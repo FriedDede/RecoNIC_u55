@@ -37,6 +37,7 @@ set dpa_skip_dirs {
     common_cells/src/deprecated
 }
 set dpa_skip_files {
+    bootrom_u55/bootrom.sv
     dpa.sv
     dpa_tb.sv
     axi_pulp/axi_test.sv
@@ -75,5 +76,17 @@ set dpa_hdl {}
 set dpa_inc {}
 dpa_collect $dpa_dir "" $dpa_skip_dirs $dpa_skip_files dpa_hdl dpa_inc
 add_files -norecurse $dpa_hdl
+
+# Compute engine bootrom: -bootrom build option, or the one shipped with dpa
+if {[info exists bootrom] && ![string equal $bootrom ""]} {
+    set dpa_bootrom $bootrom
+} else {
+    set dpa_bootrom ${dpa_dir}/bootrom_u55/bootrom.sv
+}
+if {![file exists $dpa_bootrom]} {
+    error "ERROR: \[dpa\] bootrom not found: $dpa_bootrom"
+}
+add_files -norecurse $dpa_bootrom
+puts "INFO: \[dpa\] bootrom: $dpa_bootrom"
 set_property include_dirs [concat [get_property include_dirs [current_fileset]] $dpa_inc] [current_fileset]
 puts "INFO: \[dpa\] added [llength $dpa_hdl] RTL files, [llength $dpa_inc] include dirs"

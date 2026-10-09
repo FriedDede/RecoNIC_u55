@@ -24,6 +24,7 @@
 #include <unistd.h>
 
 #include "rn_register.h"
+#include "ctl_cmd.h"
 
 #define SIZE_DEFAULT (32)
 #define COUNT_DEFAULT (1)
@@ -33,6 +34,9 @@
 #define MB_DIV 1000000
 #define KB_DIV 1000
 #define NSEC_DIV 1000000000
+
+// Give up waiting for the RISC-V after this many seconds
+#define CTL_CMD_TIMEOUT_SEC 5
 
 //Array Size to access
 #define DATA_SIZE 16
@@ -49,6 +53,8 @@ typedef struct {
 	uint16_t a_col;
 	uint16_t b_col;
 	uint16_t work_id;
+	uint16_t  c2h_work_finished;
+	uint16_t  h2c_work_start;
 } ctl_cmd_t;
 
 /* Subtract timespec t2 from t1

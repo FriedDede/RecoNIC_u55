@@ -14,7 +14,7 @@ package cache_ss_pkg;
 
     localparam int unsigned AddrWidth = 32;
     localparam int unsigned DataWidth = 512;
-    localparam int unsigned IdWidth   = 6;
+    localparam int unsigned IdWidth   = 3; // = dpa_pkg::ce_IdWidthToUncore (checked in compute_logic_wrapper)
     localparam int unsigned UserWidth = 1;
 
     typedef logic [AddrWidth-1:0]   addr_t;

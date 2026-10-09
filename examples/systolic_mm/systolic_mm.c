@@ -4,15 +4,13 @@
 //
 //==============================================================================
 //  Description: 
-//    This is a program used to evaluate a systolic-array based matrix multiplication 
-//		accelerator on FPGA. The data will be copied from host memory to device memory
-//		via QDMA AXI-MM channel. When data is ready, the host will construct a control
-//		command and issue to the accelerator inside the reconic shell. Then the
-//		accelerator reads data and starts computation. Once the computation is finished,
-//		it'll store results to destination configured in the control command received
-//		and at the same time, it will also write a complete signal to the status FIFO
-//		attached. The host will do polling on this status FIFO. Once, it detects non-
-//		empty of the FIFO, it will copy the result back to the host memory.
+//    Matrix multiplication offloaded to the RISC-V compute engine. The input
+//		matrices are copied from host memory to device memory via the QDMA AXI-MM
+//		channel. The host then writes the control command into the descriptor memory and raises
+//		h2c_work_start (ctl_cmd.h); matrix addresses in the command are in the
+//		RISC-V's view of device memory (CE_DRAM_ADDR). The RISC-V firmware (bootrom_u55) computes
+//		C = A x B, stores C in device memory and sets c2h_work_finished. The host
+//		polls c2h_work_finished and copies the result back to host memory.
 //==============================================================================
 
 #include "systolic_mm.h"
@@ -71,6 +69,8 @@ void init_ctl_cmd(ctl_cmd_t* ctl_cmd, uint32_t a_baseaddr, uint32_t b_baseaddr, 
 	ctl_cmd->a_col = a_col;
 	ctl_cmd->b_col = b_col;
 	ctl_cmd->work_id = work_id;
+	ctl_cmd->c2h_work_finished = 0;
+	ctl_cmd->h2c_work_start = 1;
 }
 
 ssize_t read_to_buffer(char *fname, int fd, char *buffer, uint64_t size,
@@ -208,16 +208,36 @@ uint32_t read32_data(uint32_t* base_address, off_t offset) {
   return value;
 }
 
+// Write the command into desc_mem (layout in ctl_cmd.h). The status word goes
+// last: raising h2c_work_start (and clearing c2h_work_finished) hands the
+// command to the RISC-V.
 void issue_ctl_cmd(void* axil_base, uint32_t offset, ctl_cmd_t* ctl_cmd) {
-	uint32_t ctl_cmd_element;
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd->ctl_cmd_size);
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd->a_baseaddr);
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd->b_baseaddr);
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd->c_baseaddr);
-	ctl_cmd_element = ((ctl_cmd->a_row << 16) & 0xffff0000) | (ctl_cmd->a_col & 0x0000ffff);
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd_element);
-	ctl_cmd_element = ((ctl_cmd->b_col << 16) & 0xffff0000) | (ctl_cmd->work_id & 0x0000ffff);
-	write32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD, ctl_cmd_element);
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_SIZE, ctl_cmd->ctl_cmd_size);
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_A_BASE, ctl_cmd->a_baseaddr);
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_B_BASE, ctl_cmd->b_baseaddr);
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_C_BASE, ctl_cmd->c_baseaddr);
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_A_DIM,
+		CTL_CMD_PACK(ctl_cmd->a_row, ctl_cmd->a_col));
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_B_DIM,
+		CTL_CMD_PACK(ctl_cmd->b_col, ctl_cmd->work_id));
+	write32_data((uint32_t*) axil_base, offset + CTL_CMD_W_STATUS,
+		CTL_CMD_PACK(ctl_cmd->c2h_work_finished, ctl_cmd->h2c_work_start));
+}
+
+// Poll c2h_work_finished. Returns 0 when set, -ETIMEDOUT after
+// CTL_CMD_TIMEOUT_SEC seconds.
+int wait_ctl_cmd_finished(void* axil_base, uint32_t offset) {
+	struct timespec ts_now, ts_deadline;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts_deadline);
+	ts_deadline.tv_sec += CTL_CMD_TIMEOUT_SEC;
+	while (CTL_CMD_HI(read32_data((uint32_t*) axil_base, offset + CTL_CMD_W_STATUS)) == 0) {
+		clock_gettime(CLOCK_MONOTONIC, &ts_now);
+		if (ts_now.tv_sec > ts_deadline.tv_sec ||
+		    (ts_now.tv_sec == ts_deadline.tv_sec && ts_now.tv_nsec >= ts_deadline.tv_nsec))
+			return -ETIMEDOUT;
+	}
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -234,12 +254,12 @@ int main(int argc, char *argv[])
 	uint16_t a_row = DATA_SIZE;
 	uint16_t a_col = DATA_SIZE;
 	uint16_t b_col = DATA_SIZE;
-	uint32_t a_baseaddr = 0;
-	uint32_t b_baseaddr = a_row*a_col*4;
-	uint32_t c_baseaddr = a_row*a_col*4*2;
+	// Device memory offsets of the matrices (QDMA); the RISC-V gets them as
+	// CE_DRAM_ADDR(offset) in the control command
+	uint64_t a_baseaddr = 0;
+	uint64_t b_baseaddr = a_row*a_col*4;
+	uint64_t c_baseaddr = a_row*a_col*4*2;
 	uint32_t work_id = 0xdd;
-	uint32_t hw_work_id = 0;
-	uint32_t compute_done;
 	uint32_t axil_map_size = RN_SCR_MAP_SIZE;
 	ssize_t rc;
 	double total_time = 0;
@@ -409,15 +429,17 @@ int main(int argc, char *argv[])
 
 	// Construct control command and issue to the reconic shell
 	ctl_cmd_t ctl_cmd;
-	init_ctl_cmd(&ctl_cmd, a_baseaddr, b_baseaddr, c_baseaddr, ctl_cmd_size, a_row, a_col, b_col, work_id);
+	init_ctl_cmd(&ctl_cmd, CE_DRAM_ADDR(a_baseaddr), CE_DRAM_ADDR(b_baseaddr),
+							CE_DRAM_ADDR(c_baseaddr), ctl_cmd_size, a_row, a_col, b_col, work_id);
 
 	// Start FPGA accelerator
 	issue_ctl_cmd(axil_base, RN_CLR_CTL_CMD, &ctl_cmd);
 
-	// Polling the status register and get data back
-	compute_done = 0;
-	while(compute_done == 0) {
-		compute_done = read32_data((uint32_t*) axil_base, RN_CLR_JOB_COMPLETED_NOT_READ);
+	// Wait for the RISC-V to finish and get data back
+	rc = wait_ctl_cmd_finished(axil_base, RN_CLR_CTL_CMD);
+	if (rc < 0) {
+		fprintf(stderr, "timeout: c2h_work_finished not set after %d s\n", CTL_CMD_TIMEOUT_SEC);
+		goto out;
 	}
 
 	rc = read_to_buffer(device, fpga_fd, (char*) source_hw_results, matrix_size*4, (uint64_t)c_baseaddr);
@@ -437,8 +459,6 @@ int main(int argc, char *argv[])
 	// Compute Software Results
 	software_mmult(source_in1, source_in2, source_sw_results);
 
-	hw_work_id = read32_data((uint32_t*) axil_base, RN_CLR_KER_STS);
-
 	// Compare the results of the Device to the simulation
 	int not_match = 0;
 	for (int i = 0; i < DATA_SIZE * DATA_SIZE; i++) {
@@ -449,10 +469,6 @@ int main(int argc, char *argv[])
 					not_match = 1;
 					break;
 			}
-	}
-
-	if(work_id != hw_work_id) {
-		not_match = 1;
 	}
 
 	if(not_match) {

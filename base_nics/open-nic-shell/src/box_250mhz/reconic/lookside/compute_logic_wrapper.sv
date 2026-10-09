@@ -379,7 +379,31 @@ AXI_BUS #(
   .AXI_USER_WIDTH (cache_ss_pkg::UserWidth)
 ) axim_dpa_to_dram[dpa_pkg::DRAM_CH_NUMBER-1:0]();
 
-`AXI_ASSIGN_MASTER(m_axi_dram,axim_dpa_to_dram[0])
+// The CE sees device memory in its 2 GB window 0x8000_0000-0xFFFF_FFFF
+// (compute_engine.sv address map). Keep only the offset in that window, so
+// CE 0x8000_0000 + X reaches device memory (HBM) address X.
+localparam int unsigned CE_DRAM_OFFSET_WIDTH = 31;
+
+AXI_BUS #(
+  .AXI_ADDR_WIDTH (cache_ss_pkg::AddrWidth),
+  .AXI_DATA_WIDTH (cache_ss_pkg::DataWidth),
+  .AXI_ID_WIDTH   (cache_ss_pkg::IdWidth),
+  .AXI_USER_WIDTH (cache_ss_pkg::UserWidth)
+) axim_dram_remap ();
+
+axi_modify_address_intf #(
+  .AXI_SLV_PORT_ADDR_WIDTH ( cache_ss_pkg::AddrWidth  ),
+  .AXI_DATA_WIDTH          ( cache_ss_pkg::DataWidth  ),
+  .AXI_ID_WIDTH            ( cache_ss_pkg::IdWidth    ),
+  .AXI_USER_WIDTH          ( cache_ss_pkg::UserWidth  )
+) i_dram_remap (
+  .slv           ( axim_dpa_to_dram[0] ),
+  .mst_aw_addr_i ( cache_ss_pkg::AddrWidth'(axim_dpa_to_dram[0].aw_addr[CE_DRAM_OFFSET_WIDTH-1:0]) ),
+  .mst_ar_addr_i ( cache_ss_pkg::AddrWidth'(axim_dpa_to_dram[0].ar_addr[CE_DRAM_OFFSET_WIDTH-1:0]) ),
+  .mst           ( axim_dram_remap     )
+);
+
+`AXI_ASSIGN_MASTER(m_axi_dram,axim_dram_remap)
 
 // Compute engine parameters are in dpa_pkg.sv
 compute_engine compute_engine_instance (

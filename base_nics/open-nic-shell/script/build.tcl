@@ -71,6 +71,7 @@ set build_root [file normalize ${root_dir}/../../build]
 #   impl         Run implementation after creating design project
 #   post_impl    Perform post implementation actions
 #   user_plugin  Path to the user plugin repo
+#   bootrom      bootrom.sv for the compute engine (default: reconic/dpa/bootrom_u55)
 #   bitstream_userid       Bitstream.config userid
 #   bitstream_usr_access   Bitstream.config usr_access
 #
@@ -95,6 +96,7 @@ array set build_options {
     -impl        0
     -post_impl   0
     -user_plugin ""
+    -bootrom     ""
     -bitstream_userid  "0xDEADC0DE"
     -bitstream_usr_access "0x66669999"
 }
@@ -132,6 +134,11 @@ foreach {key value} [array get build_options] {
 }
 foreach {key value} [array get design_params] {
     set [string range $key 1 end] $value
+}
+
+# Relative paths are taken from the directory build.tcl was started in
+if {![string equal $bootrom ""]} {
+    set bootrom [file normalize $bootrom]
 }
 
 # Sanity check

@@ -1,112 +1,58 @@
 # ==============================================================================
-#  Copyright (C) 2023, Advanced Micro Devices, Inc. All rights reserved.
+#  Copyright (C) 2026, Politecnico di Milano. All rights reserved.
 #  SPDX-License-Identifier: MIT
-# 
+#
 # ==============================================================================
 #
 # Makefile
-# -- The script is used to prepare build files and build the project to generate
-#    hardware bitstream
+# -- Build the open-nic-shell project (RecoNIC box_250mhz plugin included) and,
+#    optionally, run synthesis / implementation to generate the bitstream.
+#
+#    Sources are used in place from base_nics/open-nic-shell/src: nothing is
+#    copied. Vivado output goes to $(BUILD_DIR)/$(BOARD).
+#
+#    make build_nic                 # project + synthesis + implementation
+#    make synth                     # project + synthesis only
+#    make project                   # project only
+#    make build_nic OVERWRITE=1     # also regenerate all IPs from scratch
+#    make synth BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
+#                                   # use that directory's bootrom.sv
+#    make clean                     # delete $(BUILD_DIR)/$(BOARD)
 #
 # ==============================================================================
 
-# Please make sure you have exported BOARD_REPO in your system environment
-ROOT_DIR     := ..
-SHELL_DIR    := $(ROOT_DIR)/shell
-SCRIPT_DIR   := $(ROOT_DIR)/scripts
-BUILD_DIR    := $(ROOT_DIR)/build
-RN_BUILD_DIR := $(BUILD_DIR)/reconic
-BOARD_REPO   := 
-
-IMPL       ?= 1
-
-OVERWRITE  ?= 1
-
-GEN_HLS    ?= 0
-
-BOARD      ?= au55c
-
-PYTHON_EXE ?= python3
-
-# Check Vivado version
-VIVADO_VERSION := $(shell vivado -version | grep ^Vivado |  sed -n 's/.*\(v[0-9]*.[0-9]*\).*/\1/p')
-
-# Module directories
-## RecoNIC top module
-RN_TOP            := $(SHELL_DIR)/top
-## Packet Classification module
-PC                := packet_classification
-PKT_CLASSI_DIR    := $(SHELL_DIR)/$(PC)
-## Tag Matching module
-TM                := tag_matching
-TAG_MATCH_DIR     := $(SHELL_DIR)/$(TM)
-## Address Translator module
-AT                := address_translator
-ADDR_TRANS_DIR    := $(SHELL_DIR)/$(AT)
-## Lookaside Compute module
-LC                := lookside
-LOOKASIDE_COMP_DIR := $(SHELL_DIR)/compute/$(LC)
-## TODO: Add Streaming Compute module
-#SC                := streaming
-#STREAMING_COMP_DIR := $(SHELL_DIR)/compute/$(SC)
-## Utilities
-UTILITIES_DIR     := $(SHELL_DIR)/utilities
-## Plugs
-PLUGS_DIR         := $(SHELL_DIR)/plugs
-
-PLUGIN_DIR     := $(PLUGS_DIR)/rdma_onic_plugin
-SMARTNIC_DIR := $(ROOT_DIR)/base_nics/open-nic-shell/src/box_250mhz
+ROOT_DIR            := $(abspath ..)
+BUILD_DIR           := $(ROOT_DIR)/build
 SMARTNIC_SCRIPT_DIR := $(ROOT_DIR)/base_nics/open-nic-shell/script
 
-build_nic: build_reconic
-ifeq ($(IMPL), 1)
-	cd $(SMARTNIC_SCRIPT_DIR); vivado -mode batch -source build.tcl -tclargs -max_pkt_len 9600 -impl 1 -overwrite $(OVERWRITE) -board $(BOARD)
-else
-	cd $(SMARTNIC_SCRIPT_DIR); vivado -mode batch -source build.tcl -tclargs -max_pkt_len 9600 -impl 0 -overwrite $(OVERWRITE) -board $(BOARD)
-endif
+BOARD       ?= au55c
+JOBS        ?= 8
+MAX_PKT_LEN ?= 9600
+# 1: regenerate every IP; 0: reuse IPs already built in $(BUILD_DIR)/$(BOARD)
+OVERWRITE   ?= 0
+IMPL        ?= 1
+SYNTH       ?= 1
+# Directory of the bootrom.sv compiled into the RISC-V compute engine
+BOOTROM_DIR ?= $(ROOT_DIR)/base_nics/open-nic-shell/src/box_250mhz/reconic/dpa/bootrom_u55
 
-build_reconic: clean_build hls_build
-	mkdir -p $(BUILD_DIR)
-	mkdir -p $(RN_BUILD_DIR)
-	mkdir -p $(RN_BUILD_DIR)/$(LC)
-	cp -rf $(PLUGIN_DIR)/* $(BUILD_DIR)/
-	cp -rf $(RN_TOP) $(RN_BUILD_DIR)/
-	cp -rf $(PKT_CLASSI_DIR) $(RN_BUILD_DIR)/
-	cp -rf $(UTILITIES_DIR) $(RN_BUILD_DIR)/
-	cp $(LOOKASIDE_COMP_DIR)/*.sv $(RN_BUILD_DIR)/$(LC)/
-	cp $(LOOKASIDE_COMP_DIR)/interface/*.v $(RN_BUILD_DIR)/$(LC)/
-	cp $(LOOKASIDE_COMP_DIR)/kernel/*.v $(RN_BUILD_DIR)/$(LC)/
-	cd $(BUILD_DIR); $(PYTHON_EXE) $(SCRIPT_DIR)/build_tcl.py -nic rdma-opennic
-	cp -rf $(BUILD_DIR)/* $(SMARTNIC_DIR)/
+VIVADO      ?= vivado
 
-hls_build:
-ifeq ($(GEN_HLS), 1)
-	mkdir -p $(LOOKASIDE_COMP_DIR)/interface
-	mkdir -p $(LOOKASIDE_COMP_DIR)/kernel
-	cd $(LOOKASIDE_COMP_DIR); vitis_hls -f ./cl_box.tcl; vitis_hls -f ./mmult.tcl
-	cp $(LOOKASIDE_COMP_DIR)/cl_box/solution1/syn/verilog/* $(LOOKASIDE_COMP_DIR)/interface/
-	cp $(LOOKASIDE_COMP_DIR)/mmult/solution1/syn/verilog/* $(LOOKASIDE_COMP_DIR)/kernel/
-else
-ifeq (,$(wildcard $(LOOKASIDE_COMP_DIR)/interface/cl_box.v))
-	mkdir -p $(LOOKASIDE_COMP_DIR)/interface
-	cd $(LOOKASIDE_COMP_DIR); vitis_hls -f ./cl_box.tcl
-	cp $(LOOKASIDE_COMP_DIR)/cl_box/solution1/syn/verilog/* $(LOOKASIDE_COMP_DIR)/interface/
-else
-	@echo "Use old files in $(LOOKASIDE_COMP_DIR)/interface"
-endif
+# -rebuild 1: recreate the top-level project without the interactive prompt
+# build.tcl shows when $(BUILD_DIR)/$(BOARD) already exists
+VIVADO_ARGS = -board $(BOARD) -max_pkt_len $(MAX_PKT_LEN) -jobs $(JOBS) \
+              -overwrite $(OVERWRITE) -rebuild 1 -synth $(SYNTH) -impl $(IMPL) \
+              -bootrom $(abspath $(BOOTROM_DIR))/bootrom.sv
 
-ifeq (,$(wildcard $(LOOKASIDE_COMP_DIR)/kernel/mmult.v))
-	mkdir -p $(LOOKASIDE_COMP_DIR)/kernel
-	cd $(LOOKASIDE_COMP_DIR); vitis_hls -f ./mmult.tcl
-	cp $(LOOKASIDE_COMP_DIR)/mmult/solution1/syn/verilog/* $(LOOKASIDE_COMP_DIR)/kernel/
-else
-	@echo "Use old files in $(LOOKASIDE_COMP_DIR)/kernel"
-endif
-endif
+.PHONY: build_nic synth project clean
 
-clean_build:
-	rm -rf $(BUILD_DIR)/*
+build_nic:
+	cd $(SMARTNIC_SCRIPT_DIR); $(VIVADO) -mode batch -source build.tcl -tclargs $(VIVADO_ARGS) < /dev/null
+
+synth:
+	$(MAKE) build_nic SYNTH=1 IMPL=0
+
+project:
+	$(MAKE) build_nic SYNTH=0 IMPL=0
 
 clean:
-	rm -rf $(BUILD_DIR)/*
-	rm -rf $(SMARTNIC_DIR)/*
+	rm -rf $(BUILD_DIR)/$(BOARD)
