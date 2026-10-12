@@ -17,7 +17,7 @@
 # *************************************************************************
 # Manually connecting the Debug Hub clock pin to a valid clock source (100MHz reference clock in this case).
 # Read AR72607 for details.
-set_property C_CLK_INPUT_FREQ_HZ 300000000 [get_debug_cores dbg_hub]
+set_property C_CLK_INPUT_FREQ_HZ 100000000 [get_debug_cores dbg_hub]
 set_property C_ENABLE_CLK_DIVIDER false [get_debug_cores dbg_hub]
 set_property C_USER_SCAN_CHAIN 1 [get_debug_cores dbg_hub]
 connect_debug_port dbg_hub/clk [get_nets HBM_REF_CLK]

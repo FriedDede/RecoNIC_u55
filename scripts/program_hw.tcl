@@ -92,6 +92,10 @@ open_hw_target
 current_hw_device [get_hw_devices $hw_device_id]
 
 if {[string equal $file_type "bit"]} {
+    puts "------------------------------ WARNING -------------------------------"
+    puts "-- Bitstream are wiped after a reboot, use MCS if the configuration   "
+    puts "-- needs to survive a cold reboot.   "
+    puts "------------------------------ WARNING -------------------------------"
     puts "Program FPGA with bitstream..."
     set_property PROGRAM.FILE ${prog_file} [get_hw_devices $hw_device_id]
     set_property PROBES.FILE ${config_file} [get_hw_devices $hw_device_id]
