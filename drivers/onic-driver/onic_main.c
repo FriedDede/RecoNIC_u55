@@ -37,6 +37,25 @@ static const struct pci_device_id onic_pci_ids[] = {
 };
 MODULE_DEVICE_TABLE(pci, onic_pci_ids);
 
+static bool rsfec = true;
+module_param(rsfec, bool, 0444);
+MODULE_PARM_DESC(rsfec, "Enable RS-FEC (CL91) on the CMAC (default: 1)");
+
+static bool cmac_loopback;
+module_param(cmac_loopback, bool, 0444);
+MODULE_PARM_DESC(cmac_loopback, "Put the CMAC GTs in near-end PMA loopback, for link debug (default: 0)");
+
+static uint rss_queues;
+module_param(rss_queues, uint, 0444);
+MODULE_PARM_DESC(rss_queues, "Spread RX traffic over the first N queues only, for debug (default: 0 = all RX queues)");
+
+/* The QDMA supports at most 8 MSI-X vectors per function (PG302): a shell
+ * advertising more (older au55c builds: 10) loses the queues mapped above 7.
+ * Use max_msix=8 to run such a bitstream; libqdma warns about it at load. */
+static uint max_msix;
+module_param(max_msix, uint, 0444);
+MODULE_PARM_DESC(max_msix, "Use at most N MSI-X vectors (default: 0 = all the device exposes)");
+
 static int onic_stats_alloc(struct onic_priv *xpriv)
 {
   if (!xpriv) {
@@ -976,6 +995,9 @@ static int onic_set_num_queue(struct onic_priv *xpriv)
     return num_msix;
   }
 
+  if (max_msix && max_msix < num_msix)
+    num_msix = max_msix;
+
   nb_queues = num_msix;
   nb_queues -= xpriv->pinfo->pci_msix_user_cnt;
 
@@ -1117,7 +1139,9 @@ static bool onic_rx_lane_aligned(struct onic_priv *xpriv, u8 cmac_id)
   /* read twice to flush any previously latched value */
   val = readl(xpriv->bar_base + offset);
   val = readl(xpriv->bar_base + offset);
-  return (val == 0x3);
+  /* bit 0 stat_rx_status, bit 1 stat_rx_aligned; ignore fault bits: the
+   * remote fault (bit 5) is set in loopback while TX still sends RFI */
+  return ((val & 0x3) == 0x3);
 }
 
 static void onic_disable_cmac(struct onic_priv *xpriv)
@@ -1142,9 +1166,10 @@ static void onic_reset_cmac(struct onic_priv *xpriv) {
   }
 }
 
-static int onic_enable_cmac(struct onic_priv *xpriv)
+/* The CMAC reset also clears its register file: reapply the RS-FEC and
+ * RX/TX enable configuration after every onic_reset_cmac() */
+static void onic_reset_and_configure_cmac(struct onic_priv *xpriv)
 {
-  int timeout_cnt = 0;
   u8 cmac_id = xpriv->pinfo->port_id;
 
   onic_reset_cmac(xpriv);
@@ -1155,8 +1180,20 @@ static int onic_enable_cmac(struct onic_priv *xpriv)
     writel(0x7, xpriv->bar_base + CMAC_OFFSET_RSFEC_CONF_IND_CORRECTION(cmac_id));
   }
 
+  if (cmac_loopback)
+    writel(0x1, xpriv->bar_base + CMAC_OFFSET_GT_LOOPBACK(cmac_id));
+
   writel(0x1, xpriv->bar_base + CMAC_OFFSET_CONF_RX_1(cmac_id));
   writel(0x10, xpriv->bar_base + CMAC_OFFSET_CONF_TX_1(cmac_id));
+}
+
+static int onic_enable_cmac(struct onic_priv *xpriv)
+{
+  int timeout_cnt = 0;
+  u8 cmac_id = xpriv->pinfo->port_id;
+
+  onic_reset_and_configure_cmac(xpriv);
+  mdelay(50);
 
   /* wait for lane alignment */
   while(!onic_rx_lane_aligned(xpriv, cmac_id)) {
@@ -1164,9 +1201,7 @@ static int onic_enable_cmac(struct onic_priv *xpriv)
     timeout_cnt++;
 
     if (timeout_cnt == CMAC_RX_LANE_ALIGNMENT_RESET_CNT) {
-      onic_reset_cmac(xpriv);
-      writel(0x1, xpriv->bar_base + CMAC_OFFSET_CONF_RX_1(cmac_id));
-      writel(0x10, xpriv->bar_base + CMAC_OFFSET_CONF_TX_1(cmac_id));
+      onic_reset_and_configure_cmac(xpriv);
     }
 
     if (timeout_cnt > CMAC_RX_LANE_ALIGNMENT_TIMEOUT_CNT) {
@@ -1196,15 +1231,26 @@ static int onic_enable_cmac(struct onic_priv *xpriv)
   return 0;
 
 rx_not_aligned:
-  pr_err("[ERROR] %s, rx_not_aligned\n", __func__);
-  onic_disable_cmac(xpriv);
-  return -EBUSY;
+   pr_err("[ERROR] %s, rx_not_aligned\n", __func__);
+   /* Latched registers: the second read gives the current state */
+   readl(xpriv->bar_base + CMAC_OFFSET_STAT_RX_BLOCK_LOCK(cmac_id));
+   readl(xpriv->bar_base + CMAC_OFFSET_STAT_RX_LANE_SYNC(cmac_id));
+   readl(xpriv->bar_base + CMAC_OFFSET_STAT_RSFEC_STATUS(cmac_id));
+   pr_err("%s: rsfec_en %d rx_status 0x%08x block_lock 0x%05x lane_sync 0x%05x rsfec_status 0x%08x\n",
+          __func__, xpriv->pinfo->rsfec_en,
+          readl(xpriv->bar_base + CMAC_OFFSET_STAT_RX_STATUS(cmac_id)),
+          readl(xpriv->bar_base + CMAC_OFFSET_STAT_RX_BLOCK_LOCK(cmac_id)),
+          readl(xpriv->bar_base + CMAC_OFFSET_STAT_RX_LANE_SYNC(cmac_id)),
+          readl(xpriv->bar_base + CMAC_OFFSET_STAT_RSFEC_STATUS(cmac_id)));
+   onic_disable_cmac(xpriv);
+   return -EBUSY;
+
 }
 
 static void onic_init_reta(struct onic_priv *xpriv)
 {
   u32 val;
-  int i;
+  int i, n;
 
   /* inform shell about the function map */
   val = (FIELD_SET(QDMA_FUNC_QCONF_QBASE_MASK, xpriv->pinfo->queue_base) |
@@ -1214,8 +1260,11 @@ static void onic_init_reta(struct onic_priv *xpriv)
          QDMA_FUNC_OFFSET_QCONF(xpriv->pinfo->port_id));
 
   /* initialize indirection table */
+  n = xpriv->netdev->real_num_rx_queues;
+  if (rss_queues && rss_queues < n)
+    n = rss_queues;
   for (i = 0; i < 128; i++) {
-    u32 val = (i % xpriv->netdev->real_num_rx_queues) & 0x0000FFFF;
+    u32 val = (i % n) & 0x0000FFFF;
     u32 offset = QDMA_FUNC_OFFSET_INDIR_TABLE(xpriv->pinfo->port_id, i);
     writel(val, xpriv->bar_base + offset);
   }
@@ -1286,7 +1335,7 @@ static int onic_pci_probe(struct pci_dev *pdev,
   u64 bar_start;
   u64 bar_len;
   bool is_poll_mode = false;
-  bool en_rsfec = true;
+  bool en_rsfec = rsfec;
 
   //ret = onic_get_pinfo(pdev, &pinfo);
   ret = onic_config_platform(&pinfo, QDMA_BAR, QDMA_USER_BAR, QDMA_QUEUE_BASE, QMDA_TOTAL_QUEUE_ACTIVE,

@@ -17,12 +17,14 @@
 # *************************************************************************
 set qdma qdma_no_sriov
 create_ip -name qdma -vendor xilinx.com -library ip -module_name $qdma -dir ${ip_build_dir}
+# MSI-X table size is N-1: the QDMA supports at most 8 vectors per function
+# (PG302), vectors above 7 never fire
 set_property -dict [list \
   CONFIG.PCIE_BOARD_INTERFACE {pci_express_x16} \
-  CONFIG.PF0_MSIX_CAP_TABLE_SIZE_qdma {009} \
-  CONFIG.PF1_MSIX_CAP_TABLE_SIZE_qdma {008} \
-  CONFIG.PF2_MSIX_CAP_TABLE_SIZE_qdma {008} \
-  CONFIG.PF3_MSIX_CAP_TABLE_SIZE_qdma {008} \
+  CONFIG.PF0_MSIX_CAP_TABLE_SIZE_qdma {007} \
+  CONFIG.PF1_MSIX_CAP_TABLE_SIZE_qdma {007} \
+  CONFIG.PF2_MSIX_CAP_TABLE_SIZE_qdma {007} \
+  CONFIG.PF3_MSIX_CAP_TABLE_SIZE_qdma {007} \
   CONFIG.SYS_RST_N_BOARD_INTERFACE {pcie_perstn} \
   CONFIG.dma_intf_sel_qdma {AXI_MM_and_AXI_Stream_with_Completion} \
   CONFIG.dma_reset_source_sel {Phy_Ready} \

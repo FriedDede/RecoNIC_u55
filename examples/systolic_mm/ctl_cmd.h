@@ -34,6 +34,10 @@
 #define CTL_CMD_LO(w)        ((w) & 0xffff)
 #define CTL_CMD_PACK(hi, lo) ((((uint32_t)(hi) & 0xffff) << 16) | ((uint32_t)(lo) & 0xffff))
 
+// [31:16] c2h_work_finished, [15:0] h2c_work_start
+// CTL_CMD_START is wrote by the host, sets start to 1 and finish to 0
+// CTL_CMD_FINISHED is wrote by the dpa, sets start to 0 and finish to 1
+
 #define CTL_CMD_START        CTL_CMD_PACK(0, 1)
 #define CTL_CMD_FINISHED     CTL_CMD_PACK(1, 0)
 
