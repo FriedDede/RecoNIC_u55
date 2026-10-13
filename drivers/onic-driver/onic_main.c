@@ -112,10 +112,16 @@ static int onic_rx_deliver(struct onic_priv *xpriv, u32 q_no, unsigned int len,
       return -ENOMEM;
     }
 
-    skb_copy_to_linear_data(skb, page_address(c2h_sgl->pg) +
-          c2h_sgl->offset, len);
-    __skb_put(skb, len);
-    put_page(c2h_sgl->pg);
+    /* A packet larger than the C2H buffer size spans several buffers, which
+     * are not contiguous in memory: copy each one and release its page */
+    while (sgcnt && c2h_sgl) {
+      unsigned int n = min(c2h_sgl->len, len - skb->len);
+
+      skb_put_data(skb, page_address(c2h_sgl->pg) + c2h_sgl->offset, n);
+      put_page(c2h_sgl->pg);
+      c2h_sgl = c2h_sgl->next;
+      sgcnt--;
+    }
   } else {
     unsigned int nr_frags = 0;
     unsigned int frag_len;
