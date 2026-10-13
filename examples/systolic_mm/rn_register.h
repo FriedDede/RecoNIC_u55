@@ -9,17 +9,20 @@
 
 /* RecoNIC register space declaration */
 
-/* Packet Classification register space 0x100000 - 0x102FFF
- *   -- register space for sdnet table control (not used): 0x100000 - 0x101FFF
- *   -- register space for statistics and configuration: 0x102000 - 0x102FFF
+/* RecoNIC (box_250mhz) register space in BAR2, see the shell's
+ * system_config_address_map.sv (C_BOX0_BASE_ADDR) and
+ * system_config_axi_crossbar.tcl (M10): 0x400000 - 0x4FFFFF
+ *   -- sdnet table control (not used):  0x400000 - 0x401FFF
+ *   -- statistics and configuration:    0x402000 - 0x402FFF
+ *   -- compute logic (ctl_cmd.h):       0x403000 - 0x403FFF
  */
-#define RN_PC_BASE_ADDRESS 0x100000
+#define RN_PC_BASE_ADDRESS 0x400000
 #define RN_SCR_OFFSET      0x2000
 #define RN_CLR_OFFSET      0x3000
 
-// PCIe bar2 and bar4 map size: 4MB and 256MB, respectively
-//#define RN_SCR_MAP_SIZE  0x01000000
-#define RN_SCR_MAP_SIZE  0x00400000
+// PCIe bar2 and bar4 map size: 8MB and 256MB, respectively. BAR2 must be
+// 8MB to reach the box windows at 0x400000 and above.
+#define RN_SCR_MAP_SIZE  0x00800000
 #define RN_RDMA_MAP_SIZE 0x10000000
 
 /* Statistics and configuration register (SCR) space - 0x2000 - 0x2FFF */

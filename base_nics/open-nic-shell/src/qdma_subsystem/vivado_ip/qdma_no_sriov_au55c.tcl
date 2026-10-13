@@ -19,6 +19,8 @@ set qdma qdma_no_sriov
 create_ip -name qdma -vendor xilinx.com -library ip -module_name $qdma -dir ${ip_build_dir}
 # MSI-X table size is N-1: the QDMA supports at most 8 vectors per function
 # (PG302), vectors above 7 never fire
+# BAR2 must be 8 MB: the box windows sit at 0x400000-0x5FFFFF
+# (system_config_address_map.sv)
 set_property -dict [list \
   CONFIG.PCIE_BOARD_INTERFACE {pci_express_x16} \
   CONFIG.PF0_MSIX_CAP_TABLE_SIZE_qdma {007} \
@@ -34,7 +36,7 @@ set_property -dict [list \
   CONFIG.mode_selection {Advanced} \
   CONFIG.num_queues {512} \
   CONFIG.pf0_bar2_scale_qdma {Megabytes} \
-  CONFIG.pf0_bar2_size_qdma {4} \
+  CONFIG.pf0_bar2_size_qdma {8} \
   CONFIG.pf0_base_class_menu_qdma {Network_controller} \
   CONFIG.pf0_class_code_base_qdma {02} \
   CONFIG.pf0_class_code_sub_qdma {80} \

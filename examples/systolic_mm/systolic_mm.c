@@ -393,6 +393,21 @@ int main(int argc, char *argv[])
 		return -EINVAL;
 	}
 
+	// The control command lives in the box_250mhz window, above 4 MB: an older
+	// shell with a 4 MB BAR2 cannot reach it (reads return garbage and the
+	// status word looks "finished" immediately)
+	struct stat bar_stat;
+	if (fstat(reconic_fd, &bar_stat) == 0 &&
+	    (uint64_t) bar_stat.st_size < (uint64_t) RN_CLR_CTL_CMD + 0x1000) {
+		fprintf(stderr, "%s is %ld bytes, the control command at 0x%x is outside it: "
+			"the shell needs an 8 MB BAR2\n", pcie_device, (long) bar_stat.st_size,
+			RN_CLR_CTL_CMD);
+		close(reconic_fd);
+		return -EINVAL;
+	}
+	if ((uint64_t) bar_stat.st_size < axil_map_size)
+		axil_map_size = bar_stat.st_size;
+
 	axil_base = mmap(NULL, axil_map_size, PROT_READ | PROT_WRITE, MAP_SHARED, reconic_fd, 0);
 
   if (axil_base == MAP_FAILED) {
@@ -434,6 +449,16 @@ int main(int argc, char *argv[])
 
 	// Start FPGA accelerator
 	issue_ctl_cmd(axil_base, RN_CLR_CTL_CMD, &ctl_cmd);
+
+	// desc_mem is plain memory: if the command does not read back, the
+	// register window is not mapped where rn_register.h says
+	uint32_t c_base_rb = read32_data((uint32_t*) axil_base, RN_CLR_CTL_CMD + CTL_CMD_W_C_BASE);
+	if (c_base_rb != ctl_cmd.c_baseaddr) {
+		fprintf(stderr, "control command readback mismatch at 0x%x: wrote 0x%08x, read 0x%08x\n",
+			RN_CLR_CTL_CMD + CTL_CMD_W_C_BASE, ctl_cmd.c_baseaddr, c_base_rb);
+		rc = -EIO;
+		goto out;
+	}
 
 	// Wait for the RISC-V to finish and get data back
 	rc = wait_ctl_cmd_finished(axil_base, RN_CLR_CTL_CMD);

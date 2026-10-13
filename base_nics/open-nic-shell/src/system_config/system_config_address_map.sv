@@ -15,7 +15,7 @@
 // limitations under the License.
 //
 // *************************************************************************
-// System address map (through PCI-e BAR2 4MB)
+// System address map (through PCI-e BAR2 8MB: the boxes are above 4MB)
 //
 // --------------------------------------------------
 //   BaseAddr  |  HighAddr |  Module
@@ -38,9 +38,9 @@
 // --------------------------------------------------
 //   0x200000  |  0x3FFFFF |  RDMA subsystem
 // --------------------------------------------------
-//   0x500000  |  0x5FFFFF |  Box0 @ 250MHz
+//   0x400000  |  0x4FFFFF |  Box0 @ 250MHz (RecoNIC)
 // --------------------------------------------------
-//   0x400000  |  0x4FFFFF |  Box1 @ 322MHz
+//   0x500000  |  0x5FFFFF |  Box1 @ 322MHz
 // --------------------------------------------------
 
 `include "open_nic_shell_macros.vh"
