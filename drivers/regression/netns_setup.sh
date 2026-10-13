@@ -26,14 +26,21 @@ set -euo pipefail
 
 NS=${NS:-reconic}
 CARD_IF=${CARD_IF:-enp1s0}
-CARD_IP=${CARD_IP:-192.168.1.50/24}
+CARD_IP=${CARD_IP:-192.168.1.15/24}
 CARD_GW=${CARD_GW:-192.168.1.1}
 PEER_IF=${PEER_IF:-enxd0c0bf267d20}
+# The switch's address on the peer subnet (not the peer's own address):
+# default to the peer interface's default gateway
+PEER_GW=${PEER_GW:-$(ip -4 route show default dev "$PEER_IF" | awk '{print $3; exit}')}
 PEER_GW=${PEER_GW:-192.168.88.1}
 
 card_net() { python3 -c "import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)" "$CARD_IP"; }
 
 up() {
+    if ip -4 -o addr show dev "$PEER_IF" | grep -qw "inet ${PEER_GW}"; then
+        echo "PEER_GW=$PEER_GW is $PEER_IF's own address: it must be the switch" >&2
+        exit 1
+    fi
     ip netns add "$NS"
     # NetworkManager would otherwise keep reconfiguring the interface
     nmcli dev set "$CARD_IF" managed no 2>/dev/null || true

@@ -31,8 +31,10 @@ sudo ./netns_setup.sh down     # give the card back to the host
 
 Interface names and addresses default to the lab setup. Override them through
 the environment for `netns_setup.sh` (`CARD_IF`, `CARD_IP`, `CARD_GW`,
-`PEER_IF`, `PEER_GW`, `NS`) and with `--card-ip`, `--peer-ip`, `--netns` for
-`datapath_test.py`.
+`PEER_IF`, `PEER_GW`, `NS`). `PEER_GW` is the switch's address on the peer
+subnet and defaults to `PEER_IF`'s default gateway. `datapath_test.py` reads
+the card address from the namespace and the peer address from the routing
+table; `--card-ip`, `--peer-ip` and `--netns` override them.
 
 ## Tests
 
@@ -41,7 +43,7 @@ RX means peer → card, TX means card → peer.
 | Test | What it checks |
 | --- | --- |
 | `ping` | ICMP echo at 56, 1472 and 4000 bytes (the last one is fragmented) |
-| `udp_rx`, `udp_tx` | Every first payload byte 0x00–0xFF at sizes 5–8000 bytes (1792 datagrams), sent from 8 source ports. Each datagram is compared byte for byte. |
+| `udp_rx`, `udp_tx` | Every first payload byte 0x00–0xFF at sizes 5–8000 bytes (1792 datagrams), each first byte from its own source port (256 flows, so almost every RX queue is hit). Each datagram is compared byte for byte. |
 | `tcp_rx`, `tcp_tx` | 8 parallel streams of 16 MiB each, compared by length and SHA-256 |
 
 **Why every first byte:** the RecoNIC classifier used to treat any UDP
@@ -56,7 +58,8 @@ failure of this kind is reported as:
 
 **Why several ports and streams:** the shell spreads received IP traffic
 over the RX queues by hashing the flow, so a single flow only exercises one
-queue.
+queue. A queue that is never serviced shows up as the same first bytes
+missing at every size; the classifier bug shows up as the range 0x00-0x1F.
 
 Run a subset with `-t udp_rx,tcp_tx`, change the load with `--tcp-streams`,
 `--tcp-mib` and `--udp-sizes`, and check the script itself without a card

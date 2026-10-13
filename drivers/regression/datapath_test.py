@@ -34,7 +34,9 @@ import time
 UDP_PORT = 40000
 TCP_PORT = 40001
 UDP_SIZES = [5, 64, 300, 1000, 1472, 4000, 8000]
-UDP_SRC_PORTS = 8
+# One source port per first byte: 256 flows hash onto (almost) every RX queue.
+# A dead queue shows up as the same first bytes missing at every size.
+UDP_SRC_PORTS = 256
 UDP_GAP_S = 0.0005
 PING_SIZES = [56, 1472, 4000]
 
@@ -215,7 +217,22 @@ class CardSide:
     @staticmethod
     def result(proc, timeout):
         out, _ = proc.communicate(timeout=timeout)
-        return json.loads(out.strip().splitlines()[-1])
+        lines = out.strip().splitlines()
+        if not lines:
+            raise RuntimeError(f"card-side agent exited with status {proc.returncode} and no result")
+        return json.loads(lines[-1])
+
+    def detect_ips(self):
+        """Card IP: the namespace's IPv4 address. Peer IP: the host source
+        address used to reach it."""
+        out = subprocess.run(["ip", "-n", self.args.netns, "-4", "-o", "addr", "show", "scope", "global"],
+                             capture_output=True, text=True, check=True).stdout.split()
+        if "inet" not in out:
+            raise RuntimeError(f"no IPv4 address in namespace {self.args.netns}: run netns_setup.sh up")
+        card_ip = out[out.index("inet") + 1].split("/")[0]
+        route = subprocess.run(["ip", "-4", "route", "get", card_ip],
+                               capture_output=True, text=True, check=True).stdout.split()
+        return card_ip, route[route.index("src") + 1]
 
 
 def run_peer(role, params):
@@ -337,18 +354,22 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-t", "--tests", default=",".join(TESTS), help="comma-separated subset of: " + ",".join(TESTS))
     ap.add_argument("--netns", default="reconic", help="namespace holding the card interface")
-    ap.add_argument("--card-ip", default="192.168.1.50")
-    ap.add_argument("--peer-ip", default="192.168.88.254")
+    ap.add_argument("--card-ip", help="default: the address in --netns")
+    ap.add_argument("--peer-ip", help="default: the host address that routes to --card-ip")
     ap.add_argument("--udp-sizes", default=",".join(map(str, UDP_SIZES)),
                     type=lambda s: [int(x) for x in s.split(",")], help="UDP payload sizes, >= 5")
     ap.add_argument("--tcp-streams", type=int, default=8)
     ap.add_argument("--tcp-mib", type=int, default=16, help="MiB per TCP stream")
     ap.add_argument("--local", action="store_true", help="self-test of this script over loopback")
     args = ap.parse_args()
+    card = CardSide(args)
     if args.local:
         args.card_ip = args.peer_ip = "127.0.0.1"
-
-    card = CardSide(args)
+    elif not (args.card_ip and args.peer_ip):
+        card_ip, peer_ip = card.detect_ips()
+        args.card_ip = args.card_ip or card_ip
+        args.peer_ip = args.peer_ip or peer_ip
+    print(f"card {args.card_ip} (netns {args.netns}) <-> peer {args.peer_ip}")
     failed = []
     for name in args.tests.split(","):
         try:
