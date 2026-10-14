@@ -134,6 +134,7 @@ xilinx.com:ip:hbm:1.0\
 xilinx.com:ip:clk_wiz:6.0\
 xilinx.com:ip:proc_sys_reset:5.0\
 xilinx.com:ip:smartconnect:1.0\
+xilinx.com:ip:rama:1.1\
 "
 
    set list_ips_missing ""
@@ -285,59 +286,91 @@ proc create_root_design { parentCell } {
   set clk_wiz_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:clk_wiz:6.0 clk_wiz_0 ]
   set_property -dict [list \
     CONFIG.CLKIN1_JITTER_PS {100.0} \
-    CONFIG.CLKOUT1_JITTER {115.831} \
-    CONFIG.CLKOUT1_PHASE_ERROR {87.180} \
+    CONFIG.CLKOUT1_JITTER {105.942} \
+    CONFIG.CLKOUT1_PHASE_ERROR {80.549} \
+    CONFIG.CLKOUT2_JITTER {80.879} \
+    CONFIG.CLKOUT2_PHASE_ERROR {80.549} \
+    CONFIG.CLKOUT2_REQUESTED_OUT_FREQ {450.000} \
+    CONFIG.CLKOUT2_USED {true} \
     CONFIG.CLK_IN1_BOARD_INTERFACE {Custom} \
-    CONFIG.MMCM_CLKFBOUT_MULT_F {12.000} \
+    CONFIG.CLK_OUT1_PORT {apb_clk} \
+    CONFIG.CLK_OUT2_PORT {axi_hbm} \
+    CONFIG.MMCM_CLKFBOUT_MULT_F {13.500} \
     CONFIG.MMCM_CLKIN1_PERIOD {10.000} \
     CONFIG.MMCM_CLKIN2_PERIOD {10.000} \
+    CONFIG.MMCM_CLKOUT0_DIVIDE_F {13.500} \
+    CONFIG.MMCM_CLKOUT1_DIVIDE {3} \
     CONFIG.MMCM_DIVCLK_DIVIDE {1} \
+    CONFIG.NUM_OUT_CLKS {2} \
     CONFIG.PRIM_SOURCE {Single_ended_clock_capable_pin} \
     CONFIG.RESET_PORT {resetn} \
     CONFIG.RESET_TYPE {ACTIVE_LOW} \
   ] $clk_wiz_0
 
 
-  # Create instance: proc_sys_reset_0, and set properties
-  set proc_sys_reset_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_0 ]
+  # Create instance: proc_sys_reset_apb, and set properties
+  set proc_sys_reset_apb [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_apb ]
 
   # Create instance: smartconnect_0, and set properties
   set smartconnect_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 smartconnect_0 ]
   set_property -dict [list \
+    CONFIG.NUM_CLKS {2} \
     CONFIG.NUM_MI {2} \
     CONFIG.NUM_SI {1} \
   ] $smartconnect_0
 
 
+  # Create instance: proc_sys_reset_axis, and set properties
+  set proc_sys_reset_axis [ create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_sys_reset_axis ]
+
+  # Create instance: rama_0, and set properties
+  set rama_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:rama:1.1 rama_0 ]
+
+  # Create instance: rama_1, and set properties
+  set rama_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:rama:1.1 rama_1 ]
+
   # Create interface connections
   connect_bd_intf_net -intf_net S00_AXI_0_1 [get_bd_intf_ports s_axi_hbm] [get_bd_intf_pins smartconnect_0/S00_AXI]
-  connect_bd_intf_net -intf_net smartconnect_0_M00_AXI [get_bd_intf_pins smartconnect_0/M00_AXI] [get_bd_intf_pins hbm_0/SAXI_15_8HI]
-  connect_bd_intf_net -intf_net smartconnect_0_M01_AXI [get_bd_intf_pins smartconnect_0/M01_AXI] [get_bd_intf_pins hbm_0/SAXI_16_8HI]
+  connect_bd_intf_net -intf_net rama_0_m_axi [get_bd_intf_pins rama_0/m_axi] [get_bd_intf_pins hbm_0/SAXI_15_8HI]
+  connect_bd_intf_net -intf_net rama_1_m_axi [get_bd_intf_pins hbm_0/SAXI_16_8HI] [get_bd_intf_pins rama_1/m_axi]
+  connect_bd_intf_net -intf_net smartconnect_0_M00_AXI [get_bd_intf_pins smartconnect_0/M00_AXI] [get_bd_intf_pins rama_0/s_axi]
+  connect_bd_intf_net -intf_net smartconnect_0_M01_AXI [get_bd_intf_pins smartconnect_0/M01_AXI] [get_bd_intf_pins rama_1/s_axi]
 
   # Create port connections
   connect_bd_net -net aclk_0_1  [get_bd_ports axi_clk] \
-  [get_bd_pins smartconnect_0/aclk] \
-  [get_bd_pins hbm_0/AXI_15_ACLK] \
-  [get_bd_pins hbm_0/AXI_16_ACLK]
+  [get_bd_pins smartconnect_0/aclk]
   connect_bd_net -net clk_in1_0_1  [get_bd_ports hbm_ref_clk] \
-  [get_bd_pins clk_wiz_0/clk_in1]
-  connect_bd_net -net clk_wiz_0_clk_out1  [get_bd_pins clk_wiz_0/clk_out1] \
+  [get_bd_pins clk_wiz_0/clk_in1] \
   [get_bd_pins hbm_0/HBM_REF_CLK_0] \
-  [get_bd_pins hbm_0/HBM_REF_CLK_1] \
+  [get_bd_pins hbm_0/HBM_REF_CLK_1]
+  connect_bd_net -net clk_wiz_0_axi_hbm  [get_bd_pins clk_wiz_0/axi_hbm] \
+  [get_bd_pins hbm_0/AXI_15_ACLK] \
+  [get_bd_pins hbm_0/AXI_16_ACLK] \
+  [get_bd_pins smartconnect_0/aclk1] \
+  [get_bd_pins rama_1/axi_aclk] \
+  [get_bd_pins rama_0/axi_aclk] \
+  [get_bd_pins proc_sys_reset_axis/slowest_sync_clk]
+  connect_bd_net -net clk_wiz_0_clk_out1  [get_bd_pins clk_wiz_0/apb_clk] \
   [get_bd_pins hbm_0/APB_0_PCLK] \
   [get_bd_pins hbm_0/APB_1_PCLK] \
-  [get_bd_pins proc_sys_reset_0/slowest_sync_clk]
+  [get_bd_pins proc_sys_reset_apb/slowest_sync_clk]
   connect_bd_net -net clk_wiz_0_locked  [get_bd_pins clk_wiz_0/locked] \
-  [get_bd_pins proc_sys_reset_0/dcm_locked]
-  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn  [get_bd_pins proc_sys_reset_0/peripheral_aresetn] \
+  [get_bd_pins proc_sys_reset_apb/dcm_locked] \
+  [get_bd_pins proc_sys_reset_axis/dcm_locked]
+  connect_bd_net -net proc_sys_reset_0_interconnect_aresetn  [get_bd_pins proc_sys_reset_axis/interconnect_aresetn] \
+  [get_bd_pins rama_0/axi_aresetn] \
+  [get_bd_pins rama_1/axi_aresetn]
+  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn  [get_bd_pins proc_sys_reset_apb/peripheral_aresetn] \
   [get_bd_pins hbm_0/APB_0_PRESET_N] \
   [get_bd_pins hbm_0/APB_1_PRESET_N]
-  connect_bd_net -net qdma_0_axi_aresetn  [get_bd_ports axi_resetn] \
-  [get_bd_pins hbm_0/AXI_15_ARESET_N] \
+  connect_bd_net -net proc_sys_reset_1_peripheral_aresetn  [get_bd_pins proc_sys_reset_axis/peripheral_aresetn] \
   [get_bd_pins hbm_0/AXI_16_ARESET_N] \
+  [get_bd_pins hbm_0/AXI_15_ARESET_N]
+  connect_bd_net -net qdma_0_axi_aresetn  [get_bd_ports axi_resetn] \
   [get_bd_pins smartconnect_0/aresetn] \
   [get_bd_pins clk_wiz_0/resetn] \
-  [get_bd_pins proc_sys_reset_0/ext_reset_in]
+  [get_bd_pins proc_sys_reset_apb/ext_reset_in] \
+  [get_bd_pins proc_sys_reset_axis/ext_reset_in]
 
   # Create address segments
   assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces s_axi_hbm] [get_bd_addr_segs hbm_0/SAXI_15_8HI/HBM_MEM00] -force
@@ -411,6 +444,7 @@ proc create_root_design { parentCell } {
   # Restore current instance
   current_bd_instance $oldCurInst
 
+  validate_bd_design
   save_bd_design
 }
 # End of create_root_design()
@@ -421,3 +455,5 @@ proc create_root_design { parentCell } {
 ##################################################################
 
 create_root_design ""
+
+
