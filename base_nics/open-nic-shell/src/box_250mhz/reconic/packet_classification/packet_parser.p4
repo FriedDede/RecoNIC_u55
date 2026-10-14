@@ -14,6 +14,9 @@ const bit<16> ETH_IPV6 = 0x86DD;
 const bit<8> IPPROTO_TCP = 0x06;
 const bit<8> IPPROTO_UDP = 0x11;
 
+// RoCEv2 UDP destination port
+const bit<16> UDP_PORT_ROCEV2 = 4791;
+
 // Operations that contain RETH header
 const bit<5> WRITE_FIRST    = 0x06;
 const bit<5> WRITE_ONLY     = 0x0a;
@@ -282,8 +285,19 @@ parser parser_inst(packet_in pkt,
     }
   }
 
+  // Only RoCEv2 packets (UDP dport 4791) carry a BTH: parsing one in any
+  // other UDP packet (e.g. DHCP, whose first byte decodes as an RC opcode)
+  // would classify it as RDMA and steal it from the QDMA/host path
   state parse_udp {
     pkt.extract<udp_h>(hdr.udp);
+
+    transition select(hdr.udp.dport) {
+      UDP_PORT_ROCEV2: parse_bth;
+      default        : accept;
+    }
+  }
+
+  state parse_bth {
     pkt.extract<bth_h>(hdr.bth);
 
     transition select(hdr.bth.op) {
