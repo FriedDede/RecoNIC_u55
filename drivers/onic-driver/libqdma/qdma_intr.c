@@ -552,6 +552,61 @@ static int pci_msix_vec_count(struct pci_dev *dev)
 }
 #endif
 
+static const char *intr_type_name(enum intr_type_list type)
+{
+	switch (type) {
+	case INTR_TYPE_ERROR:
+		return "error";
+	case INTR_TYPE_USER:
+		return "user";
+	case INTR_TYPE_DATA:
+		return "data";
+	case INTR_TYPE_MBOX:
+		return "mbox";
+	default:
+		return "?";
+	}
+}
+
+/*
+ * Print the MSI-X mapping (software index -> MSI-X table entry used by the
+ * QDMA -> Linux IRQ) and warn when the function uses more vectors than the
+ * QDMA supports: PG302 allows up to QDMA_DEV_MSIX_VEC_MAX per function. The
+ * extra ones wrap around: on the au55c shell hw vectors 8/9 were delivered
+ * on the irq of vectors 0/1 (user/error), so their queues were never
+ * serviced. Interrupt aggregation is unaffected by the limit.
+ */
+static void intr_print_mapping(struct xlnx_dma_dev *xdev)
+{
+	int i;
+
+	if (xdev->num_vecs > QDMA_DEV_MSIX_VEC_MAX)
+		pr_warn("%s: function %u uses %d MSI-X vectors, but the QDMA supports at most %d per function: vectors %d-%d fire on the irq of vectors %d-%d, whose handlers do not service their queues\n",
+			xdev->conf.name, xdev->func_id, xdev->num_vecs,
+			QDMA_DEV_MSIX_VEC_MAX, QDMA_DEV_MSIX_VEC_MAX,
+			xdev->num_vecs - 1, 0,
+			xdev->num_vecs - 1 - QDMA_DEV_MSIX_VEC_MAX);
+
+	for (i = 0; i < xdev->num_vecs; i++) {
+		u16 hw = xdev->msix[i].entry;
+		/* where an out-of-range vector really lands: hw % 8 */
+		int alias = hw % QDMA_DEV_MSIX_VEC_MAX;
+
+		if (hw < QDMA_DEV_MSIX_VEC_MAX || alias >= xdev->num_vecs)
+			pr_info("%s: msix[%d] %-5s -> hw vector %u, irq %u\n",
+				xdev->conf.name, i,
+				intr_type_name(xdev->dev_intr_info_list[i].intr_vec_map.intr_type),
+				hw, xdev->msix[i].vector);
+		else
+			pr_warn("%s: msix[%d] %-5s -> hw vector %u, irq %u, but fires as hw vector %d on irq %u (msix[%d] %s)\n",
+				xdev->conf.name, i,
+				intr_type_name(xdev->dev_intr_info_list[i].intr_vec_map.intr_type),
+				hw, xdev->msix[i].vector, alias,
+				xdev->msix[alias].vector, alias,
+				intr_type_name(xdev->dev_intr_info_list[alias].intr_vec_map.intr_type));
+	}
+}
+
 int intr_setup(struct xlnx_dma_dev *xdev)
 {
 	int rv = 0;
@@ -700,6 +755,8 @@ int intr_setup(struct xlnx_dma_dev *xdev)
 		if (rv)
 			goto cleanup_irq;
 	}
+
+	intr_print_mapping(xdev);
 
 	xdev->flags |= XDEV_FLAG_IRQ;
 	return rv;
