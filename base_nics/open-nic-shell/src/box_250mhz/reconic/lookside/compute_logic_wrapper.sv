@@ -611,6 +611,13 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
         .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
     ) axim_cdc2dw ();
 
+    AXI_BUS #(
+        .AXI_ADDR_WIDTH ( cache_ss_pkg::AddrWidth  ),
+        .AXI_DATA_WIDTH ( cache_ss_pkg::DataWidth  ),
+        .AXI_ID_WIDTH   ( cache_ss_pkg::IdWidth    ),
+        .AXI_USER_WIDTH ( cache_ss_pkg::UserWidth  )
+    ) axim_dw2cut ();
+
 
     `AXI_ASSIGN_FROM_REQ (axim_ce2cdc, m_axim_ce2cache_req[i])
     `AXI_ASSIGN_TO_RESP  (m_axim_ce2cache_resp[i], axim_ce2cdc)
@@ -639,13 +646,28 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
       .AXI_SLV_PORT_DATA_WIDTH (dpa_pkg::ce_DataWidth),
 
       .AXI_MST_PORT_DATA_WIDTH (cache_ss_pkg::DataWidth),
-      .AXI_USER_WIDTH          (dpa_pkg::ce_UserWidth)
+      .AXI_USER_WIDTH          (dpa_pkg::ce_UserWidth),
+
+      .AXI_MAX_READS(4)
     ) i_ce_dw_upsize (
       .clk_i  (cache_aclk),
       .rst_ni (cache_pu_rstn[i]),
 
       .slv    (axim_cdc2dw),
-      .mst    (axim_ce_to_cache[i])
+      .mst    (axim_dw2cut)
+    );
+
+    // register slice: breaks the upsizer R/B logic -> dev_mem crossbar ready path
+    axi_cut_intf #(
+      .ADDR_WIDTH (cache_ss_pkg::AddrWidth),
+      .DATA_WIDTH (cache_ss_pkg::DataWidth),
+      .ID_WIDTH   (cache_ss_pkg::IdWidth),
+      .USER_WIDTH (cache_ss_pkg::UserWidth)
+    ) i_ce_dw_cut (
+      .clk_i  (cache_aclk),
+      .rst_ni (cache_pu_rstn[i]),
+      .in     (axim_dw2cut),
+      .out    (axim_ce_to_cache[i])
     );
 
 end : cdc_ce_cache

@@ -98,6 +98,7 @@
 `include "common_cells_registers.svh"
 
 (* no_ungroup *)
+(* keep_hierarchy = "yes" *)
 (* no_boundary_optimization *)
 module cdc_fifo_gray #(
   /// The width of the default logic type.
@@ -168,6 +169,7 @@ endmodule
 
 
 (* no_ungroup *)
+(* keep_hierarchy = "yes" *)
 (* no_boundary_optimization *)
 module cdc_fifo_gray_src #(
   parameter type T = logic,
@@ -226,6 +228,7 @@ endmodule
 
 
 (* no_ungroup *)
+(* keep_hierarchy = "yes" *)
 (* no_boundary_optimization *)
 module cdc_fifo_gray_dst #(
   parameter type T = logic,

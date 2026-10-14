@@ -412,6 +412,7 @@ close $fp
 # Read constraint files
 read_xdc -unmanaged ${constr_dir}/${board}/pins.xdc
 read_xdc -unmanaged ${constr_dir}/${board}/timing.xdc
+read_xdc -unmanaged ${constr_dir}/common/cdc.xdc
 read_xdc ${constr_dir}/${board}/general.xdc
 read_xdc ${build_dir}/run_params.xdc
 
