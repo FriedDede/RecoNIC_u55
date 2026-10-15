@@ -583,7 +583,7 @@ module open_nic_shell #(
   logic   [3 : 0] axi_rdma_rsp_payload_arqos;
 
   // RDMA AXI MM interface used to store payload from RDMA Read response operation
-  logic           axi_compute_logic_awid;
+  logic   [4 : 0] axi_compute_logic_awid;
   logic  [63 : 0] axi_compute_logic_awaddr;
   logic   [3 : 0] axi_compute_logic_awqos;
   logic   [7 : 0] axi_compute_logic_awlen;
@@ -599,11 +599,11 @@ module open_nic_shell #(
   logic           axi_compute_logic_wvalid;
   logic           axi_compute_logic_wready;
   logic           axi_compute_logic_awlock;
-  logic           axi_compute_logic_bid;
+  logic   [4 : 0] axi_compute_logic_bid;
   logic   [1 : 0] axi_compute_logic_bresp;
   logic           axi_compute_logic_bvalid;
   logic           axi_compute_logic_bready;
-  logic           axi_compute_logic_arid;
+  logic   [4 : 0] axi_compute_logic_arid;
   logic  [63 : 0] axi_compute_logic_araddr;
   logic   [7 : 0] axi_compute_logic_arlen;
   logic   [2 : 0] axi_compute_logic_arsize;
@@ -612,7 +612,7 @@ module open_nic_shell #(
   logic   [2 : 0] axi_compute_logic_arprot;
   logic           axi_compute_logic_arvalid;
   logic           axi_compute_logic_arready;
-  logic           axi_compute_logic_rid;
+  logic   [4 : 0] axi_compute_logic_rid;
   logic [511 : 0] axi_compute_logic_rdata;
   logic   [1 : 0] axi_compute_logic_rresp;
   logic           axi_compute_logic_rlast;

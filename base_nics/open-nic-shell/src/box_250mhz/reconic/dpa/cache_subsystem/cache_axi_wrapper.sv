@@ -429,7 +429,7 @@ module cache_axi_wrapper
     // ---------------------------------------------------------
     // On-chip cache storage
     // ---------------------------------------------------------
-    cache_bram #(
+    rtl_bram #(
         .ADDR_WIDTH       (ADDR_WIDTH),
         .CACHE_ADDR_WIDTH (OFFSET_BITS + INDEX_BITS),
         .DATA_WIDTH       (DATA_WIDTH),

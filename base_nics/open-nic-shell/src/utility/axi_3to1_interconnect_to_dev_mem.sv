@@ -60,7 +60,7 @@ module axi_3to1_interconnect_to_dev_mem #(
   input             s_axi_qdma_mm_arlock,
   input     [3 : 0] s_axi_qdma_mm_arqos,
 
-  input             s_axi_compute_logic_awid,
+  input     [4 : 0] s_axi_compute_logic_awid,
   input    [63 : 0] s_axi_compute_logic_awaddr,
   input     [3 : 0] s_axi_compute_logic_awqos,
   input     [7 : 0] s_axi_compute_logic_awlen,
@@ -76,11 +76,11 @@ module axi_3to1_interconnect_to_dev_mem #(
   input             s_axi_compute_logic_wvalid,
   output            s_axi_compute_logic_wready,
   input             s_axi_compute_logic_awlock,
-  output            s_axi_compute_logic_bid,
+  output    [4 : 0] s_axi_compute_logic_bid,
   output    [1 : 0] s_axi_compute_logic_bresp,
   output            s_axi_compute_logic_bvalid,
   input             s_axi_compute_logic_bready,
-  input             s_axi_compute_logic_arid,
+  input     [4 : 0] s_axi_compute_logic_arid,
   input    [63 : 0] s_axi_compute_logic_araddr,
   input     [7 : 0] s_axi_compute_logic_arlen,
   input     [2 : 0] s_axi_compute_logic_arsize,
@@ -89,7 +89,7 @@ module axi_3to1_interconnect_to_dev_mem #(
   input     [2 : 0] s_axi_compute_logic_arprot,
   input             s_axi_compute_logic_arvalid,
   output            s_axi_compute_logic_arready,
-  output            s_axi_compute_logic_rid,
+  output    [4 : 0] s_axi_compute_logic_rid,
   output  [511 : 0] s_axi_compute_logic_rdata,
   output    [1 : 0] s_axi_compute_logic_rresp,
   output            s_axi_compute_logic_rlast,
@@ -265,8 +265,9 @@ assign axi_arlock [C_QDMA_MM_IDX *1 +: 1]               = s_axi_qdma_mm_arlock;
 assign axi_arqos  [C_QDMA_MM_IDX *4 +: 4]               = s_axi_qdma_mm_arqos;
 
 // AXI slave signals for data access from compute logic
-//assign axi_awid   [C_COMPUTE_LOGIC_IDX *2 +: 2]      = {1'b0, s_axi_compute_logic_awid};
-assign axi_awid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_awvalid ? 5'd8 : 5'd0;
+// compute logic drives the full 5-bit crossbar ID; B/R return it unchanged so
+// responses reach the right requester inside the compute engine
+assign axi_awid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_awvalid ? s_axi_compute_logic_awid : 5'd0;
 assign axi_awaddr [C_COMPUTE_LOGIC_IDX *64 +: 64]    = s_axi_compute_logic_awaddr;
 assign axi_awqos  [C_COMPUTE_LOGIC_IDX *4 +: 4]      = s_axi_compute_logic_awqos;
 assign axi_awlen  [C_COMPUTE_LOGIC_IDX *8 +: 8]      = s_axi_compute_logic_awlen;
@@ -282,11 +283,11 @@ assign axi_wlast  [C_COMPUTE_LOGIC_IDX *1 +: 1]      = s_axi_compute_logic_wlast
 assign axi_wvalid [C_COMPUTE_LOGIC_IDX *1 +: 1]      = s_axi_compute_logic_wvalid;
 assign s_axi_compute_logic_wready                    = axi_wready[C_COMPUTE_LOGIC_IDX *1 +: 1];
 assign axi_awlock [C_COMPUTE_LOGIC_IDX *1 +: 1]      = s_axi_compute_logic_awlock;
-assign s_axi_compute_logic_bid                       = axi_bid[C_COMPUTE_LOGIC_IDX *5 +: 1];
+assign s_axi_compute_logic_bid                       = axi_bid[C_COMPUTE_LOGIC_IDX *5 +: 5];
 assign s_axi_compute_logic_bresp                     = axi_bresp[C_COMPUTE_LOGIC_IDX *2 +: 2];
 assign s_axi_compute_logic_bvalid                    = axi_bvalid[C_COMPUTE_LOGIC_IDX *1 +: 1];
 assign axi_bready [C_COMPUTE_LOGIC_IDX *1 +: 1]      = s_axi_compute_logic_bready;
-assign axi_arid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_arvalid ? 5'd8 : 5'd4;
+assign axi_arid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_arvalid ? s_axi_compute_logic_arid : 5'd0;
 assign axi_araddr [C_COMPUTE_LOGIC_IDX *64 +: 64]    = s_axi_compute_logic_araddr;
 assign axi_arlen  [C_COMPUTE_LOGIC_IDX *8  +: 8]     = s_axi_compute_logic_arlen;
 assign axi_arsize [C_COMPUTE_LOGIC_IDX *3  +: 3]     = s_axi_compute_logic_arsize;
@@ -295,7 +296,7 @@ assign axi_arcache[C_COMPUTE_LOGIC_IDX *4  +: 4]     = s_axi_compute_logic_arcac
 assign axi_arprot [C_COMPUTE_LOGIC_IDX *3  +: 3]     = s_axi_compute_logic_arprot;
 assign axi_arvalid[C_COMPUTE_LOGIC_IDX *1  +: 1]     = s_axi_compute_logic_arvalid;
 assign s_axi_compute_logic_arready                   = axi_arready[C_COMPUTE_LOGIC_IDX *1 +: 1];
-assign s_axi_compute_logic_rid                       = axi_rid[C_COMPUTE_LOGIC_IDX *5 +: 1];
+assign s_axi_compute_logic_rid                       = axi_rid[C_COMPUTE_LOGIC_IDX *5 +: 5];
 assign s_axi_compute_logic_rdata                     = axi_rdata[C_COMPUTE_LOGIC_IDX *512 +: 512];
 assign s_axi_compute_logic_rresp                     = axi_rresp[C_COMPUTE_LOGIC_IDX *2 +: 2];
 assign s_axi_compute_logic_rlast                     = axi_rlast[C_COMPUTE_LOGIC_IDX *1 +: 1];

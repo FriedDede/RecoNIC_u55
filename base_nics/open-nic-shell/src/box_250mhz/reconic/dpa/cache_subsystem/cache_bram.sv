@@ -7,7 +7,7 @@
 // The AXI protocol handling (bursts, IDs, responses) is delegated to
 // axi_to_mem_intf (open-nic-shell/src/axi_pulp/src/axi_to_mem.sv); this
 // module only has to implement the plain memory array behind it.
-module cache_bram #(
+module rtl_bram #(
     parameter ADDR_WIDTH       = 40,  // width of the connected AXI_BUS address
     parameter CACHE_ADDR_WIDTH = 34,  // OFFSET_BITS + INDEX_BITS: the only
                                        // address bits actually backed by

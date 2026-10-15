@@ -506,7 +506,7 @@ module snitch_core_axi import snitch_pkg::*; import fpnew_pkg::*; import riscv_i
 
 // decouple CORE data AXI output port
   axi_cut #(
-    .Bypass     ( '1 ),
+    .Bypass     ( '0 ),
     .aw_chan_t  ( axi_slv_aw_chan_t ),
     .w_chan_t   ( axi_slv_w_chan_t ),
     .b_chan_t   ( axi_slv_b_chan_t ),
@@ -525,7 +525,7 @@ module snitch_core_axi import snitch_pkg::*; import fpnew_pkg::*; import riscv_i
 
 // decouple FPU data AXI output port
   axi_cut #(
-    .Bypass     ( '1 ),
+    .Bypass     ( '0 ),
     .aw_chan_t  ( axi_slv_aw_chan_t ),
     .w_chan_t   ( axi_slv_w_chan_t ),
     .b_chan_t   ( axi_slv_b_chan_t ),
@@ -544,7 +544,7 @@ module snitch_core_axi import snitch_pkg::*; import fpnew_pkg::*; import riscv_i
 
 // decouple inst AXI output port
   axi_cut #(
-    .Bypass     ( '1 ),
+    .Bypass     ( '0 ),
     .aw_chan_t  ( axi_slv_aw_chan_t ),
     .w_chan_t   ( axi_slv_w_chan_t ),
     .b_chan_t   ( axi_slv_b_chan_t ),

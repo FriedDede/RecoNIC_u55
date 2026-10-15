@@ -17,14 +17,20 @@ module compute_engine
     import snitch_cluster_pkg::*;
     import dpa_pkg::* ;  
 (
-    input clk,
-    input core_areset_n,
+    input   logic ref_clk, // 250Mhz
+    input   logic ref_areset_n,
 
-    output  axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2mem_req,
-    input   axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2mem_resp,
+    // DRAM MEMORY CHANNEL
+    output  axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_dram_req,
+    input   axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_dram_resp,
+    input   logic dram_axim_clk,
+    input   logic dram_axim_reset_n [dpa_pkg::DRAM_CH_NUMBER],
 
-    output  axim64_core2mem_req_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0]  m_axim_ce2cfu_req,
-    input   axim64_core2mem_resp_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cfu_resp
+    // DESCRIPTOR MEMORY CHANNEL
+    output  axim64_core2mem_req_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0]  m_axim_desc_req,
+    input   axim64_core2mem_resp_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_desc_resp,
+    input   logic desc_axim_clk,
+    input   logic desc_axim_reset_n 
 
     //input  logic          uart_rx         ,
     //output logic          uart_tx
@@ -94,27 +100,47 @@ endfunction
 
 localparam rule_t [3:0] AddrMapUncore = addr_map_gen();
 
+// axi busses: [DRAM_CH_NUMBER-1:0] clusters
+
+AXI_BUS #(
+    .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
+    .AXI_DATA_WIDTH ( AxiDataWidth     ),
+    .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
+    .AXI_USER_WIDTH ( AxiUserWidth     )
+) axi_cdc2out_dram[DRAM_CH_NUMBER-1:0]();
+
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
     .AXI_DATA_WIDTH ( AxiDataWidth     ),
     .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
     .AXI_USER_WIDTH ( AxiUserWidth     )
 ) axi_dram[DRAM_CH_NUMBER-1:0]();
+
+AXI_BUS #(
+    .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth       ),
+    .AXI_DATA_WIDTH ( dpa_pkg::ce_DataWidth       ),
+    .AXI_ID_WIDTH   ( dpa_pkg::ce_IdWidthToUncore ),
+    .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
+) axi_cdc2out_desc [dpa_pkg::DRAM_CH_NUMBER-1:0] ();
+
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
     .AXI_DATA_WIDTH ( AxiDataWidth     ),
     .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
     .AXI_USER_WIDTH ( AxiUserWidth     )
-) axi_cfu[CLUSTER_NUMBER-1:0]();
-
+) axi_desc[CLUSTER_NUMBER-1:0]();
 
 // interrupt handling bus
 snitch_pkg::interrupts_t [TOTAL_CORE_NUMBER - 1 : 0] core_irq_i;
 
 // clocking and reset declaration
+logic ce_clk;
+logic internal_ce_rstn;
+logic pll_locked;
 
 logic uncore_areset_n;
-assign uncore_areset_n = core_areset_n;
+assign uncore_areset_n = internal_ce_rstn;
+
 
 // ---------------
 // Core
@@ -141,8 +167,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .BootAddr           (BOOT_ADDR),
         .SnitchPMACfg       (snitch_cluster_pkg::SnitchPMACfg)    
         ) i_snitch(
-            .clk_i                  (clk),
-            .rst_ni                 (core_areset_n),
+            .clk_i                  (ce_clk),
+            .rst_ni                 (internal_ce_rstn),
             .hart_id_i              ((j)), // id unique only in the cluster
             .irq_i                  ('0),
             // icache
@@ -188,8 +214,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .Cfg(xbar_cfg),
         .rule_t(rule_t)
     ) i_axi_xbar_intf (
-        .clk_i(clk),
-        .rst_ni(core_areset_n),
+        .clk_i(ce_clk),
+        .rst_ni(internal_ce_rstn),
         .test_i('0),
         .slv_ports(axi_snitch2mux),
         .mst_ports(axi_xbar2uncore),
@@ -200,19 +226,15 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
 
     // to hbm
     `AXI_ASSIGN(axi_dram[i], axi_xbar2uncore[1])
-    `AXI_ASSIGN_TO_REQ(m_axim_ce2mem_req[i], axi_dram[i])
-    `AXI_ASSIGN_FROM_RESP(axi_dram[i], m_axim_ce2mem_resp[i])
     // to cfu
-    `AXI_ASSIGN(axi_cfu[i], axi_xbar2uncore[2])
-    `AXI_ASSIGN_TO_REQ(m_axim_ce2cfu_req[i], axi_cfu[i])
-    `AXI_ASSIGN_FROM_RESP(axi_cfu[i], m_axim_ce2cfu_resp[i])
+    `AXI_ASSIGN(axi_desc[i], axi_xbar2uncore[2])
     // to uncore
     `AXI_ASSIGN(axi_rom, axi_xbar2uncore[0])
     `AXI_ASSIGN(axi_clint, axi_xbar2uncore[3])
     // clint logic
     logic rtc;
-    always_ff @(posedge clk or negedge uncore_areset_n) begin
-        if (~uncore_areset_n) begin
+    always_ff @(posedge ce_clk or negedge internal_ce_rstn) begin
+        if (~internal_ce_rstn) begin
             rtc <= 0;
         end else begin
             rtc <= rtc ^ 1'b1;
@@ -225,8 +247,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .UserWidth(AxiUserWidth),
         .NR_CORES(1)
     ) axi_clint_instance(
-        .clk_i(clk),
-        .rst_ni(uncore_areset_n),
+        .clk_i(ce_clk),
+        .rst_ni(internal_ce_rstn),
         .testmode_i('0),
         .clint(axi_clint),
         .rtc_i(rtc),
@@ -245,8 +267,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .USER_WIDTH ( AxiUserWidth),
         .NUM_BANKS  ( 1)
     ) i_axi_to_mem (
-        .clk_i       ( clk),
-        .rst_ni      ( core_areset_n),
+        .clk_i       ( ce_clk),
+        .rst_ni      ( internal_ce_rstn),
         .busy_o      ( ),
         .slv         ( axi_rom),
         .mem_req_o   ( rom_req),
@@ -260,7 +282,7 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .mem_rdata_i ( rom_rdata)
     );
     bootrom i_bootrom (
-        .clk_i      ( clk       ),
+        .clk_i      ( ce_clk       ),
         .req_i      ( rom_req   ),
         .addr_i     ( rom_addr  ),
         .rdata_o    ( rom_rdata ),
@@ -270,6 +292,78 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
     // assign axi_dram[i].b_user = '0;
     // assign axi_dram[i].r_user = '0;
 end
+
+// -----------------
+// CLOCK AND RESET
+// -----------------
+
+// compute engine clock
+xlnx_clk_gen i_ce_clk_gen (
+    .clk_out1 ( ce_clk      ),  // Core 50 MHz
+    .reset    ( ~ref_areset_n  ),
+    .locked   ( pll_locked  ),
+    .clk_in1  ( ref_clk   )   // 250 Mhz ref clk
+);
+
+rstgen i_rstgen_main (
+      .clk_i        ( ce_clk                    ),
+      .rst_ni       ( pll_locked & (ref_areset_n)  ),
+      .test_mode_i  ( '0                          ),
+      .rst_no       ( internal_ce_rstn            ),
+      .init_no      (                             ) // keep open
+  );
+
+// -----------------
+// OUTPUT CDC
+// -----------------
+
+// clock domain conversion: riscv -> desc_mem, one per cluster
+for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : desc_cdc
+
+    axi_cdc_intf #(
+      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
+      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
+      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
+      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
+      .LOG_DEPTH(3),
+      .SYNC_STAGES(2)
+    ) axi_cdc_rv_desc (
+      .src_clk_i  (ce_clk),
+      .src_rst_ni (internal_ce_rstn),
+      .src        (axi_desc[i]),
+
+      .dst_clk_i  (desc_axim_clk),
+      .dst_rst_ni (desc_axim_reset_n),
+      .dst        (axi_cdc2out_desc[i])
+    );
+
+    `AXI_ASSIGN_TO_REQ(m_axim_desc_req[i], axi_cdc2out_desc[i])
+    `AXI_ASSIGN_FROM_RESP(axi_cdc2out_desc[i], m_axim_desc_resp[i])
+end : desc_cdc
+
+// clock domain conversion: riscv -> dram, one per cluster
+for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : dram_cdc
+
+    axi_cdc_intf #(
+      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
+      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
+      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
+      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
+      .LOG_DEPTH(3),
+      .SYNC_STAGES(2)
+    ) axi_cdc_rv_mem (
+      .src_clk_i  (ce_clk),
+      .src_rst_ni (internal_ce_rstn),
+      .src        (axi_dram[i]),
+
+      .dst_clk_i  (dram_axim_clk),
+      .dst_rst_ni (dram_axim_reset_n[i]),
+      .dst        (axi_cdc2out_dram[i])
+    );
+
+    `AXI_ASSIGN_TO_REQ(m_axim_dram_req[i], axi_cdc2out_dram[i])
+    `AXI_ASSIGN_FROM_RESP(axi_cdc2out_dram[i], m_axim_dram_resp[i])
+end : dram_cdc
 
 // -----------------
 // END

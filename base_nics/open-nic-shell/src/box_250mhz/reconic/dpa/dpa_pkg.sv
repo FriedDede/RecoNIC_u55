@@ -21,7 +21,7 @@ localparam ce_UserWidth         = snitch_cluster_pkg::NarrowUserWidth;
 // Descriptor BRAM AXI ID width: the host + CEs mux in front of it
 // (compute_logic_wrapper.sv desc_mux, DRAM_CH_NUMBER + 1 slave ports) prepends
 // $clog2(DRAM_CH_NUMBER + 1) port-select bits to ce_IdWidthToUncore.
-// desc_mem (cache_bram in compute_logic_wrapper.sv) takes this ID width.
+// desc_mem (rtl_bram in compute_logic_wrapper.sv) takes this ID width.
 localparam int unsigned desc_bram_id_width = ce_IdWidthToUncore + $clog2(DRAM_CH_NUMBER + 1);
 
 

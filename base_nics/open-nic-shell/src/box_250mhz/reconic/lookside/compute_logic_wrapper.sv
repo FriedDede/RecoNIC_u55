@@ -4,6 +4,9 @@
 //
 //==============================================================================
 `timescale 1ns/1ps
+`include "axi_assign.svh"
+`include "axi_typedef.svh"
+`include "hbm_axi.svh"
 
 module compute_logic_wrapper
   import axi_pkg::*;
@@ -35,7 +38,7 @@ module compute_logic_wrapper
   input         s_axil_rready,
   
   // master AXI interface for device memory access
-  output            m_axi_dram_awid,
+  output    [4 : 0] m_axi_dram_awid,
   output   [63 : 0] m_axi_dram_awaddr,
   output    [3 : 0] m_axi_dram_awqos,
   output    [7 : 0] m_axi_dram_awlen,
@@ -51,11 +54,11 @@ module compute_logic_wrapper
   output            m_axi_dram_wvalid,
   input             m_axi_dram_wready,
   output            m_axi_dram_awlock,
-  input             m_axi_dram_bid,
+  input     [4 : 0] m_axi_dram_bid,
   input     [1 : 0] m_axi_dram_bresp,
   input             m_axi_dram_bvalid,
   output            m_axi_dram_bready,
-  output            m_axi_dram_arid,
+  output    [4 : 0] m_axi_dram_arid,
   output   [63 : 0] m_axi_dram_araddr,
   output    [7 : 0] m_axi_dram_arlen,
   output    [2 : 0] m_axi_dram_arsize,
@@ -64,7 +67,7 @@ module compute_logic_wrapper
   output    [2 : 0] m_axi_dram_arprot,
   output            m_axi_dram_arvalid,
   input             m_axi_dram_arready,
-  input             m_axi_dram_rid,
+  input     [4 : 0] m_axi_dram_rid,
   input   [511 : 0] m_axi_dram_rdata,
   input     [1 : 0] m_axi_dram_rresp,
   input             m_axi_dram_rlast,
@@ -86,126 +89,11 @@ module compute_logic_wrapper
   input          axis_rstn
 );
 
-logic [1:0] m_axi_awlock_tmp;
-logic [1:0] m_axi_arlock_tmp;
-
-logic [31:0] ctl_cmd_fifo_dout;
-logic        ctl_cmd_fifo_empty_n;
-logic        ctl_cmd_fifo_rd_en;
-
-logic [31:0] ker_status_fifo_din;
-logic        ker_status_fifo_full_n;
-logic        ker_status_fifo_wr_en;
-
-logic cl_box_start;
-logic cl_box_done;
-logic cl_box_idle;
-logic cl_box_ready;
-
-logic [31:0] a_baseaddr;
-logic        a_baseaddr_ap_vld;
-logic [31:0] b_baseaddr;
-logic        b_baseaddr_ap_vld;
-logic [31:0] c_baseaddr;
-logic        c_baseaddr_ap_vld;
-logic [31:0] a_row;
-logic        a_row_ap_vld;
-logic [31:0] a_col;
-logic        a_col_ap_vld;
-logic [31:0] b_col;
-logic        b_col_ap_vld;
-logic [31:0] work_id;
-logic        work_id_ap_vld;
-
-logic ap_start;
-logic ap_done;
-logic ap_idle;
-logic ap_ready;
-
-logic [63:0] a_baseaddr_reg;
-logic [63:0] b_baseaddr_reg;
-logic [63:0] c_baseaddr_reg;
-logic [31:0] a_row_reg;
-logic [31:0] a_col_reg;
-logic [31:0] b_col_reg;
-logic [31:0] work_id_reg;
-
-localparam COMPUTE_IDLE = 1'b0;
-localparam COMPUTE_BUSY = 1'b1;
-
-logic comp_state;
-logic new_req;
-logic new_req_reg;
-
-// control command processor
-// control_command_processor #(
-//   .AXIL_ADDR_WIDTH (AXIL_ADDR_WIDTH),
-//   .AXIL_DATA_WIDTH (AXIL_DATA_WIDTH)
-// ) ctl_cmd_proc (
-//   .s_axil_awvalid(s_axil_awvalid),
-//   .s_axil_awaddr (s_axil_awaddr[AXIL_ADDR_WIDTH-1:0]),
-//   .s_axil_awready(s_axil_awready),
-//   .s_axil_wvalid (s_axil_wvalid ),
-//   .s_axil_wdata  (s_axil_wdata  ),
-//   .s_axil_wready (s_axil_wready ),
-//   .s_axil_bvalid (s_axil_bvalid ),
-//   .s_axil_bresp  (s_axil_bresp  ),
-//   .s_axil_bready (s_axil_bready ),
-//   .s_axil_arvalid(s_axil_arvalid),
-//   .s_axil_araddr (s_axil_araddr[AXIL_ADDR_WIDTH-1:0]),
-//   .s_axil_arready(s_axil_arready),
-//   .s_axil_rvalid (s_axil_rvalid ),
-//   .s_axil_rdata  (s_axil_rdata  ),
-//   .s_axil_rresp  (s_axil_rresp  ),
-//   .s_axil_rready (s_axil_rready ),
-// 
-//   .cl_box_idle         (cl_box_idle),
-//   .cl_box_start        (cl_box_start),
-//   .cl_box_done         (cl_box_done),
-//   .cl_kernel_idle      (ap_idle),
-//   .cl_kernel_done      (ap_done),
-//   .ctl_cmd_fifo_dout   (ctl_cmd_fifo_dout),
-//   .ctl_cmd_fifo_empty_n(ctl_cmd_fifo_empty_n),
-//   .ctl_cmd_fifo_rd_en  (ctl_cmd_fifo_rd_en),
-// 
-//   .ker_status_fifo_din   (ker_status_fifo_din),
-//   .ker_status_fifo_full_n(ker_status_fifo_full_n),
-//   .ker_status_fifo_wr_en (ker_status_fifo_wr_en),
-// 
-//   .axil_aclk (axil_aclk),
-//   .axil_arstn(axil_rstn),
-//   .axis_aclk (axis_aclk),
-//   .axis_arstn(axis_rstn)
-// );
-// 
-// // Compute_Logic box
-// cl_box cl_box_wrapper (
-//   //.ap_local_block              (),
-//   //.ap_local_deadlock           (),
-//   .ap_clk                      (axis_aclk),
-//   .ap_rst                      (~axis_rstn),
-//   .ap_start                    (cl_box_start),
-//   .ap_done                     (cl_box_done),
-//   .ap_idle                     (cl_box_idle),
-//   .ap_ready                    (cl_box_ready),
-//   .ctl_cmd_stream_dout         (ctl_cmd_fifo_dout),
-//   .ctl_cmd_stream_empty_n      (ctl_cmd_fifo_empty_n),
-//   .ctl_cmd_stream_read         (ctl_cmd_fifo_rd_en),
-//   .a_baseaddr                  (a_baseaddr),
-//   .a_baseaddr_ap_vld           (a_baseaddr_ap_vld),
-//   .b_baseaddr                  (b_baseaddr),
-//   .b_baseaddr_ap_vld           (b_baseaddr_ap_vld),
-//   .c_baseaddr                  (c_baseaddr),
-//   .c_baseaddr_ap_vld           (c_baseaddr_ap_vld),
-//   .a_row                       (a_row),
-//   .a_row_ap_vld                (a_row_ap_vld),
-//   .a_col                       (a_col),
-//   .a_col_ap_vld                (a_col_ap_vld),
-//   .b_col                       (b_col),
-//   .b_col_ap_vld                (b_col_ap_vld),
-//   .work_id                     (work_id),
-//   .work_id_ap_vld              (work_id_ap_vld)
-// );
+// -----------------------------------------------------------------------------------------------------------------------------------------
+// AXIL CTRL FROM HOST
+// Register control: s_axil reads/writes the descriptor memory directly
+// (axil_aclk domain); the descriptor memory is shared by the host and all CEs
+// -----------------------------------------------------------------------------------------------------------------------------------------
 
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth     ),
@@ -214,10 +102,6 @@ AXI_BUS #(
     .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth     )
 ) axi_ctrl_to_desc ();
 
-// ------------------------------------------------------------------
-// Register control: s_axil reads/writes the descriptor memory directly
-// (axil_aclk domain); the descriptor memory is shared by the host and all CEs
-// ------------------------------------------------------------------
 AXI_LITE #(
   .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth ),
   .AXI_DATA_WIDTH ( AXIL_DATA_WIDTH       )
@@ -278,100 +162,29 @@ axi_dw_converter_intf #(
   .mst    ( axi_ctrl_to_desc    )
 );
 
-// mmult kernel_mmult (
-  //   //.ap_local_block   (),
-  //   //.ap_local_deadlock(),
-  //   .ap_clk           (axis_aclk),
-  //   .ap_rst_n         (axis_rstn),
-  //   .ap_start         (ap_start),
-  //   .ap_done          (ap_done),
-  //   .ap_idle          (ap_idle),
-  //   .ap_ready         (ap_ready),
-  //   .m_axi_systolic_AWVALID (m_axi_awvalid),
-  //   .m_axi_systolic_AWREADY (m_axi_awready),
-  //   .m_axi_systolic_AWADDR  (m_axi_awaddr),
-  //   .m_axi_systolic_AWID    (m_axi_awid),
-  //   .m_axi_systolic_AWLEN   (m_axi_awlen),
-  //   .m_axi_systolic_AWSIZE  (m_axi_awsize),
-  //   .m_axi_systolic_AWBURST (m_axi_awburst),
-  //   .m_axi_systolic_AWLOCK  (m_axi_awlock_tmp),
-  //   .m_axi_systolic_AWCACHE (m_axi_awcache),
-  //   .m_axi_systolic_AWPROT  (m_axi_awprot),
-  //   .m_axi_systolic_AWQOS   (m_axi_awqos),
-  //   .m_axi_systolic_AWREGION(),
-  //   .m_axi_systolic_AWUSER  (),
-  //   .m_axi_systolic_WVALID  (m_axi_wvalid),
-  //   .m_axi_systolic_WREADY  (m_axi_wready),
-  //   .m_axi_systolic_WDATA   (m_axi_wdata),
-  //   .m_axi_systolic_WSTRB   (m_axi_wstrb),
-  //   .m_axi_systolic_WLAST   (m_axi_wlast),
-  //   .m_axi_systolic_WID     (),
-  //   .m_axi_systolic_WUSER   (),
-  //   .m_axi_systolic_ARVALID (m_axi_arvalid),
-  //   .m_axi_systolic_ARREADY (m_axi_arready),
-  //   .m_axi_systolic_ARADDR  (m_axi_araddr),
-  //   .m_axi_systolic_ARID    (m_axi_arid),
-  //   .m_axi_systolic_ARLEN   (m_axi_arlen),
-  //   .m_axi_systolic_ARSIZE  (m_axi_arsize),
-  //   .m_axi_systolic_ARBURST (m_axi_arburst),
-  //   .m_axi_systolic_ARLOCK  (m_axi_arlock_tmp),
-  //   .m_axi_systolic_ARCACHE (m_axi_arcache),
-  //   .m_axi_systolic_ARPROT  (m_axi_arprot),
-  //   .m_axi_systolic_ARQOS   (m_axi_arqos),
-  //   .m_axi_systolic_ARREGION(),
-  //   .m_axi_systolic_ARUSER  (),
-  //   .m_axi_systolic_RVALID  (m_axi_rvalid),
-  //   .m_axi_systolic_RREADY  (m_axi_rready),
-  //   .m_axi_systolic_RDATA   (m_axi_rdata),
-  //   .m_axi_systolic_RLAST   (m_axi_rlast),
-  //   .m_axi_systolic_RID     (m_axi_rid),
-  //   .m_axi_systolic_RUSER   (),
-  //   .m_axi_systolic_RRESP   (m_axi_rresp),
-  //   .m_axi_systolic_BVALID  (m_axi_bvalid),
-  //   .m_axi_systolic_BREADY  (m_axi_bready),
-  //   .m_axi_systolic_BRESP   (m_axi_bresp),
-  //   .m_axi_systolic_BID     (m_axi_bid),
-  //   .m_axi_systolic_BUSER   (),
-  //   .work_id_out_stream_din   (ker_status_fifo_din),
-  //   .work_id_out_stream_full_n(ker_status_fifo_full_n),
-  //   .work_id_out_stream_write (ker_status_fifo_wr_en),
-  //   .a             (a_baseaddr_reg),
-  //   .b             (b_baseaddr_reg),
-  //   .c             (c_baseaddr_reg),
-  //   .a_row         (a_row_reg),
-  //   .a_row_ap_vld  (new_req_reg),
-  //   .a_col         (a_col_reg),
-  //   .a_col_ap_vld  (new_req_reg),
-  //   .b_col         (b_col_reg),
-  //   .b_col_ap_vld  (new_req_reg),
-  //   .work_id       (work_id_reg),
-  //   .work_id_ap_vld(new_req_reg)
-// );
-
-// ------------------------------------------------------------------
-// Compute subsystem
-// ------------------------------------------------------------------
-//`ifdef __synthesis__
-`include "axi_assign.svh"
-`include "axi_typedef.svh"
-`include "hbm_axi.svh"
+// -----------------------------------------------------------------------------------------------------------------------------------------
+// CLOCK AND RESET SIGNALS
+// -----------------------------------------------------------------------------------------------------------------------------------------
                           
-logic ce_clk;
-logic internal_ce_rstn;
 logic internal_axis_rstn;
-logic pll_locked;
-
 assign internal_axis_rstn = axis_rstn;
 
-// Compute engine clock domain
-  // ce to descriptor ring
-  dpa_pkg::axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2desc_req;
-  dpa_pkg::axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2desc_resp;
-  // ce to cache
-  dpa_pkg::axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cache_req;
-  dpa_pkg::axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cache_resp;
+// descriptor memory clock domain
+logic desc_mem_clk;
+logic desc_mem_reset_n;
+assign desc_mem_clk     = axis_aclk;
+assign desc_mem_reset_n = internal_axis_rstn;
 
-// dram clock domain
+// cache memory clock domain
+logic cache_arstn;
+logic cache_aclk;
+logic cache_pu_rstn [dpa_pkg::DRAM_CH_NUMBER];
+assign cache_aclk = axis_aclk;
+
+// -----------------------------------------------------------------------------------------------------------------------------------------
+// MEMORY CHANNELS TO DRAM
+// -----------------------------------------------------------------------------------------------------------------------------------------
+
 AXI_BUS #(
   .AXI_ADDR_WIDTH (cache_ss_pkg::AddrWidth),
   .AXI_DATA_WIDTH (cache_ss_pkg::DataWidth),
@@ -385,7 +198,7 @@ AXI_BUS #(
 localparam int unsigned CE_DRAM_OFFSET_WIDTH = 31;
 
 AXI_BUS #(
-  .AXI_ADDR_WIDTH (cache_ss_pkg::AddrWidth),
+  .AXI_ADDR_WIDTH (64),
   .AXI_DATA_WIDTH (cache_ss_pkg::DataWidth),
   .AXI_ID_WIDTH   (cache_ss_pkg::IdWidth),
   .AXI_USER_WIDTH (cache_ss_pkg::UserWidth)
@@ -393,50 +206,55 @@ AXI_BUS #(
 
 axi_modify_address_intf #(
   .AXI_SLV_PORT_ADDR_WIDTH ( cache_ss_pkg::AddrWidth  ),
+  .AXI_MST_PORT_ADDR_WIDTH ( 64                       ),
   .AXI_DATA_WIDTH          ( cache_ss_pkg::DataWidth  ),
   .AXI_ID_WIDTH            ( cache_ss_pkg::IdWidth    ),
   .AXI_USER_WIDTH          ( cache_ss_pkg::UserWidth  )
 ) i_dram_remap (
   .slv           ( axim_dpa_to_dram[0] ),
-  .mst_aw_addr_i ( cache_ss_pkg::AddrWidth'(axim_dpa_to_dram[0].aw_addr[CE_DRAM_OFFSET_WIDTH-1:0]) ),
-  .mst_ar_addr_i ( cache_ss_pkg::AddrWidth'(axim_dpa_to_dram[0].ar_addr[CE_DRAM_OFFSET_WIDTH-1:0]) ),
+  // 16GB HBM ADDRESSING: 34bit
+  // 63 : 34  - unused
+  // 33       - HBM STACK
+  // 32 : 31  - Which 2GB block (4 blocks in a 8GB stack)
+  // 30 : 0   - 2GB address space for each compute engine
+  .mst_aw_addr_i ( {30'b0, 1'b0, 2'b0, (axim_dpa_to_dram[0].aw_addr[CE_DRAM_OFFSET_WIDTH-1:0])} ),
+  .mst_ar_addr_i ( {30'b0, 1'b0, 2'b0, (axim_dpa_to_dram[0].ar_addr[CE_DRAM_OFFSET_WIDTH-1:0])} ),
   .mst           ( axim_dram_remap     )
 );
 
 `AXI_ASSIGN_MASTER(m_axi_dram,axim_dram_remap)
 
+// -----------------------------------------------------------------------------------------------------------------------------------------
+// Compute engine 
+// -----------------------------------------------------------------------------------------------------------------------------------------
+
+// ce to descriptor ring
+  dpa_pkg::axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2desc_req;
+  dpa_pkg::axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2desc_resp;
+  // ce to cache
+  dpa_pkg::axim64_core2mem_req_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cache_req;
+  dpa_pkg::axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cache_resp;
+
 // Compute engine parameters are in dpa_pkg.sv
 compute_engine compute_engine_instance (
 
-  .clk(ce_clk),
-  .core_areset_n(internal_ce_rstn),
+  .ref_clk(axis_aclk),
+  .ref_areset_n(internal_axis_rstn),
 
-  .m_axim_ce2mem_req(m_axim_ce2cache_req),
-  .m_axim_ce2mem_resp(m_axim_ce2cache_resp),
+  .m_axim_dram_req(m_axim_ce2cache_req),
+  .m_axim_dram_resp(m_axim_ce2cache_resp),
+  .dram_axim_clk(cache_aclk),
+  .dram_axim_reset_n(cache_pu_rstn),
 
-  .m_axim_ce2cfu_req(m_axim_ce2desc_req),
-  .m_axim_ce2cfu_resp(m_axim_ce2desc_resp)
+  .m_axim_desc_req(m_axim_ce2desc_req),
+  .m_axim_desc_resp(m_axim_ce2desc_resp),
+  .desc_axim_clk(desc_mem_clk),
+  .desc_axim_reset_n(desc_mem_reset_n)
 );
 
-// compute engine clock
-xlnx_clk_gen i_xlnx_clk_gen (
-    .clk_out1 ( ce_clk      ),  // Core 50 MHz
-    .reset    ( ~axis_rstn  ),
-    .locked   ( pll_locked  ),
-    .clk_in1  ( axis_aclk   )   // 250 Mhz ref clk
-);
-
-rstgen i_rstgen_main (
-      .clk_i        ( ce_clk                    ),
-      .rst_ni       ( pll_locked & (axis_rstn)  ),
-      .test_mode_i  ( '0                          ),
-      .rst_no       ( internal_ce_rstn            ),
-      .init_no      (                             ) // keep open
-  );
-
-// ------------------------------------------------
+// -----------------------------------------------------------------------------------------------------------------------------------------
 //  DESCRIPTOR/COMPLETION RING Memory
-// ------------------------------------------------
+// -----------------------------------------------------------------------------------------------------------------------------------------
 
 // One 4 KB descriptor memory shared by the host (register control) and every
 // CE. desc_mux prepends its slave-port index to the ID, so its master port is
@@ -448,13 +266,6 @@ localparam int unsigned DESC_MEM_ADDR_WIDTH = 12;                       // 4 KB
 localparam int unsigned DESC_MUX_SLV_PORTS  = dpa_pkg::DRAM_CH_NUMBER + 1; // CEs + host
 localparam int unsigned DESC_MUX_HOST_PORT  = dpa_pkg::DRAM_CH_NUMBER;
 
-// descriptor memory clock domain
-logic desc_mem_clk;
-logic desc_mem_reset_n;
-
-assign desc_mem_clk     = axis_aclk;
-assign desc_mem_reset_n = internal_axis_rstn;
-
 // desc_mux slave ports: [DRAM_CH_NUMBER-1:0] CEs, [DESC_MUX_HOST_PORT] host
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth       ),
@@ -463,37 +274,13 @@ AXI_BUS #(
     .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
 ) axi_cdc2mux_desc [DESC_MUX_SLV_PORTS-1:0] ();
 
-// clock domain conversion: riscv -> desc_mem, one per CE
-for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : ce_desc_cdc
+// axim channels: riscv_desc_output -> desc_mem, one per CE
+for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : desc_assign
 
-  AXI_BUS #(
-      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
-      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
-      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
-      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth)
-  ) axi_ce2cdc_desc ();
+  `AXI_ASSIGN_FROM_REQ (axi_cdc2mux_desc[i], m_axim_ce2desc_req[i])
+  `AXI_ASSIGN_TO_RESP  (m_axim_ce2desc_resp[i], axi_cdc2mux_desc[i])
 
-  `AXI_ASSIGN_FROM_REQ (axi_ce2cdc_desc, m_axim_ce2desc_req[i])
-  `AXI_ASSIGN_TO_RESP  (m_axim_ce2desc_resp[i], axi_ce2cdc_desc)
-
-  axi_cdc_intf #(
-      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
-      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
-      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
-      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
-      .LOG_DEPTH(3),
-      .SYNC_STAGES(2)
-  ) axi_cdc_rv_desc (
-      .src_clk_i  (ce_clk),
-      .src_rst_ni (internal_ce_rstn),
-      .src        (axi_ce2cdc_desc),
-
-      .dst_clk_i  (desc_mem_clk),
-      .dst_rst_ni (desc_mem_reset_n),
-      .dst        (axi_cdc2mux_desc[i])
-  );
-
-end : ce_desc_cdc
+end : desc_assign
 
 // clock domain conversion: axil_aclk (register control) -> desc_mem
 
@@ -553,9 +340,9 @@ axi_mux_intf #(
     .mst    (axi_cdc2desc_mem)
   );
 
-// Descriptor memory: RTL block RAM behind axi_to_mem (cache_bram),
+// Descriptor memory: RTL block RAM behind axi_to_mem (rtl_bram),
 // DESC_MEM_ADDR_WIDTH bits of storage, 1-cycle read latency
-cache_bram #(
+rtl_bram #(
     .ADDR_WIDTH       ( dpa_pkg::ce_AddrWidth       ),
     .CACHE_ADDR_WIDTH ( DESC_MEM_ADDR_WIDTH         ),
     .DATA_WIDTH       ( dpa_pkg::ce_DataWidth       ),
@@ -566,9 +353,9 @@ cache_bram #(
     .slv     ( axi_cdc2desc_mem )
 );
 
-logic cache_arstn;
-logic cache_aclk;
-logic cache_pu_rstn [dpa_pkg::DRAM_CH_NUMBER];
+// -----------------------------------------------------------------------------------------------------------------------------------------
+//  CACHE SUBSYSTEM AND MEMORY ACCESS
+// -----------------------------------------------------------------------------------------------------------------------------------------
 
 for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cache_pu_rst
   logic [1:0] rst_q;
@@ -587,7 +374,6 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cache_pu_rst
   assign cache_pu_rstn[i] = rstn_q;
 end : cache_pu_rst
 
-
 AXI_BUS #(
   .AXI_ADDR_WIDTH (cache_ss_pkg::AddrWidth),
   .AXI_DATA_WIDTH (cache_ss_pkg::DataWidth),
@@ -595,21 +381,14 @@ AXI_BUS #(
   .AXI_USER_WIDTH (cache_ss_pkg::UserWidth)
 ) axim_ce_to_cache[dpa_pkg::DRAM_CH_NUMBER-1:0]();
 
-for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
+for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : dw_cache
 
     AXI_BUS #(
         .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth       ),
         .AXI_DATA_WIDTH ( dpa_pkg::ce_DataWidth       ),
         .AXI_ID_WIDTH   ( dpa_pkg::ce_IdWidthToUncore ),
         .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
-    ) axim_ce2cdc ();
-
-    AXI_BUS #(
-        .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth       ),
-        .AXI_DATA_WIDTH ( dpa_pkg::ce_DataWidth       ),
-        .AXI_ID_WIDTH   ( dpa_pkg::ce_IdWidthToUncore ),
-        .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
-    ) axim_cdc2dw ();
+    ) axim_ce2dw ();
 
     AXI_BUS #(
         .AXI_ADDR_WIDTH ( cache_ss_pkg::AddrWidth  ),
@@ -618,27 +397,8 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
         .AXI_USER_WIDTH ( cache_ss_pkg::UserWidth  )
     ) axim_dw2cut ();
 
-
-    `AXI_ASSIGN_FROM_REQ (axim_ce2cdc, m_axim_ce2cache_req[i])
-    `AXI_ASSIGN_TO_RESP  (m_axim_ce2cache_resp[i], axim_ce2cdc)
-
-    // clock domain conversion: riscv -> cache
-    axi_cdc_intf #(
-        .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
-        .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
-        .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
-        .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
-        .LOG_DEPTH      (3),
-        .SYNC_STAGES    (2)
-    ) axi_cdc_ce_cache (
-        .src_clk_i  (ce_clk),
-        .src_rst_ni (internal_ce_rstn),
-        .src        (axim_ce2cdc),
-
-        .dst_clk_i  (cache_aclk),
-        .dst_rst_ni (cache_pu_rstn[i]),
-        .dst        (axim_cdc2dw)
-    );
+    `AXI_ASSIGN_FROM_REQ (axim_ce2dw, m_axim_ce2cache_req[i])
+    `AXI_ASSIGN_TO_RESP  (m_axim_ce2cache_resp[i], axim_ce2dw)
 
     axi_dw_converter_intf #(
       .AXI_ID_WIDTH            (dpa_pkg::ce_IdWidthToUncore),
@@ -653,7 +413,7 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
       .clk_i  (cache_aclk),
       .rst_ni (cache_pu_rstn[i]),
 
-      .slv    (axim_cdc2dw),
+      .slv    (axim_ce2dw),
       .mst    (axim_dw2cut)
     );
 
@@ -670,7 +430,7 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : cdc_ce_cache
       .out    (axim_ce_to_cache[i])
     );
 
-end : cdc_ce_cache
+end : dw_cache
 
 
 for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : rx_cache
@@ -701,8 +461,6 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : rx_cache
   end : gen_no_cache
 end: rx_cache
 
-assign cache_aclk = axis_aclk;
-
 rstgen i_rstgen_cache (
     .clk_i        ( cache_aclk                  ),
     .rst_ni       ( internal_axis_rstn          ),
@@ -711,60 +469,9 @@ rstgen i_rstgen_cache (
     .init_no      (                             ) // keep open
 );
 
-
-// assign new_req = cl_box_done;
-// 
-// always_ff @(posedge axis_aclk) begin
-//   if(!axis_rstn) begin
-//     a_baseaddr_reg <= 64'd0;
-//     b_baseaddr_reg <= 64'd0;
-//     c_baseaddr_reg <= 64'd0;
-//     a_row_reg      <= 32'd0;
-//     a_col_reg      <= 32'd0;
-//     b_col_reg      <= 32'd0;
-//     work_id_reg    <= 32'd0;
-// 
-//     ap_start    <= 1'b0;
-//     new_req_reg <= 1'b0;
-//     comp_state  <= COMPUTE_IDLE;
-//   end
-//   else begin
-//     ap_start <= 1'b0;
-//     a_baseaddr_reg <= a_baseaddr_ap_vld ? {32'd0, a_baseaddr} : a_baseaddr_reg;
-//     b_baseaddr_reg <= b_baseaddr_ap_vld ? {32'd0, b_baseaddr} : b_baseaddr_reg;
-//     c_baseaddr_reg <= c_baseaddr_ap_vld ? {32'd0, c_baseaddr} : c_baseaddr_reg;
-// 
-//     a_row_reg     <= a_row_ap_vld ? a_row : a_row_reg;
-//     a_col_reg     <= a_col_ap_vld ? a_col : a_col_reg;
-//     b_col_reg     <= b_col_ap_vld ? b_col : b_col_reg;
-// 
-//     work_id_reg   <= work_id_ap_vld ? work_id : work_id_reg;
-// 
-//     new_req_reg <= new_req;
-// 
-//     case(comp_state)
-//     COMPUTE_IDLE: begin
-//       if(ap_idle) begin
-//         if(new_req) begin
-//           ap_start <= 1'b1;
-//           comp_state <= COMPUTE_BUSY;
-//         end
-//         else begin
-//           comp_state <= COMPUTE_IDLE;
-//         end
-//       end
-//     end
-//     COMPUTE_BUSY: begin
-//       ap_start   <= ap_ready ? 1'b0 : 1'b1;
-//       comp_state <= ap_done ? COMPUTE_IDLE : COMPUTE_BUSY;
-//     end
-//     endcase
-//   end
-// end
-
-// ------------------------------------------------------------------
+// -----------------------------------------------------------------------------------------------------------------------------------------
 // DESIGN CONSTRAINT COMPLIANCE
-// ------------------------------------------------------------------
+// -----------------------------------------------------------------------------------------------------------------------------------------
 
 // single channel memory 
 // TODO: Multi channel support
@@ -779,6 +486,13 @@ end
 initial begin
   assert (cache_ss_pkg::IdWidth == dpa_pkg::ce_IdWidthToUncore)
     else $fatal(1, "cache_ss_pkg::IdWidth (%0d) must equal dpa_pkg::ce_IdWidthToUncore (%0d)", cache_ss_pkg::IdWidth, dpa_pkg::ce_IdWidthToUncore);
+end
+
+// m_axi_dram ID ports are 5 bits (dev_mem_3to1_axi_crossbar ID_WIDTH); the
+// DRAM bus ID is zero-extended onto them, so it must not be wider
+initial begin
+  assert (cache_ss_pkg::IdWidth <= 5)
+    else $fatal(1, "cache_ss_pkg::IdWidth (%0d) exceeds the m_axi_dram ID width (5)", cache_ss_pkg::IdWidth);
 end
 
 
