@@ -8,8 +8,37 @@ set -Eeuo pipefail
 
 echo -e "simulate.sh - RecoNIC simulation with RoCEv2 packets"
 
-VIVADO_VERSION=2021.2
-QUESTA_VERSION=2020.4
+# Default to the Vivado found in PATH
+if [[ -z "${VIVADO_DIR:-}" ]]; then
+  VIVADO_DIR=$(dirname "$(dirname "$(readlink -f "$(command -v vivado)")")")
+fi
+export VIVADO_DIR
+
+# Name of the precompiled Vivado IP library for an IP, at the version found in
+# XIL_LIB_DIR (e.g. xil_lib ernic -> ernic_v4_2_0). XIL_LIB_DIR is the xsim
+# library shipped with Vivado, or COMPILED_LIB_DIR for Questa
+xil_lib()
+{
+  local lib
+  lib=$(ls -d "$XIL_LIB_DIR"/${1}_v[0-9]* 2>/dev/null | sort -V | tail -1)
+  if [[ -z "$lib" ]]; then
+    echo "ERROR: no precompiled library for $1 in $XIL_LIB_DIR" >&2
+    return 1
+  fi
+  basename "$lib"
+}
+
+# Libraries the testbenches are elaborated against
+xil_sim_libs()
+{
+  local libs="-L reco -L $UVM_LIB -L xilinx_vip -L xpm" ip
+  for ip in ernic vitis_net_p4 cam cam_blk_lib cdcam blk_mem_gen lib_bmg fifo_generator lib_fifo \
+            axi_bram_ctrl axi_crossbar axi_data_fifo axi_register_slice axi_infrastructure \
+            generic_baseblocks smartconnect axi_protocol_checker; do
+    libs+=" -L $(xil_lib $ip)" || return 1
+  done
+  echo "$libs -L unisims_ver -L unimacro_ver -L secureip"
+}
 
 cur_dir=$(pwd)
 sim_dir=$(dirname $cur_dir)
@@ -21,6 +50,12 @@ sim_script_dir=${sim_dir}/scripts
 # Questasim main
 run_questasim()
 {
+  if [[ -z "${COMPILED_LIB_DIR:-}" ]]; then
+    echo "ERROR: COMPILED_LIB_DIR is not set (Vivado simulation library compiled for Questa)"
+    exit 1
+  fi
+  XIL_LIB_DIR=$COMPILED_LIB_DIR
+  UVM_LIB=mtiUvm
   echo "current directory: $(pwd)"
 
   if [[ ! -d "${build_dir}/questa_lib" ]]; then
@@ -38,12 +73,13 @@ run_questasim()
   # Compile
   source questasim_compile.do 2>&1 | tee -a questasim_compile.log
 
-  # Elaborate, reco - RecoNIC work library 
-  vopt -64 +acc=npr -L reco -L xilinx_vip -L xpm -L axi_crossbar_v2_1_26 -L axi_protocol_checker_v2_0_11 -L cam_v2_2_2 -L vitis_net_p4_v1_0_2 -L blk_mem_gen_v8_4_5 -L lib_bmg_v1_0_14 -L fifo_generator_v13_2_6 -L lib_fifo_v1_0_15 -L ernic_v3_1_1 -L unisims_ver -L unimacro_ver -L secureip -work reco reco.$top_module_name reco.glbl -o $top_module_opt -l questasim_elaborate.log
+  # Elaborate, reco - RecoNIC work library
+  vopt -64 +acc=npr $(xil_sim_libs) -work reco reco.$top_module_name reco.glbl -o $top_module_opt -l questasim_elaborate.log
 
   # Simulate
   if [[ $2 == "off" ]]; then
-    vsim -64 -c -work reco $top_module_opt -do 'add wave -r /*; run -all' -l questasim_simulate.log
+    # Batch: no waveform logging, exit when the testbench calls $finish
+    vsim -64 -c -onfinish exit -work reco $top_module_opt -do 'run -all; quit -f' -l questasim_simulate.log
   else
     vsim -64 -work reco $top_module_opt -do 'add wave -r /*; run -all' -l questasim_simulate.log
   fi
@@ -52,6 +88,8 @@ run_questasim()
 # Vivado xsim main
 run_xsim()
 {
+  XIL_LIB_DIR=$VIVADO_DIR/data/xsim/ip
+  UVM_LIB=uvm
   echo "current director: $(pwd)"
   copy_test_data $1
 
@@ -62,13 +100,7 @@ run_xsim()
   source xsim_compile.do 2>&1 | tee -a xsim_compile.log
 
   # Elaborate reco
-  if [[ "$3" == "cl_tb_top" ]]; then
-    xelab --incr --relax --debug typical --mt auto -L reco -L ernic_v3_1_1 -L xilinx_vip -L xpm -L cam_v2_2_2 -L vitis_net_p4_v1_0_2 -L -L axi_protocol_checker_v2_0_8 -L unisims_ver -L unimacro_ver -L secureip --snapshot $top_module_opt reco.cl_tb_top reco.glbl -log xsim_elaborate.log
-  elif [[ "$3" == "rn_tb_2rdma_top" ]]; then
-    xelab --incr --relax --debug typical --mt auto -L reco -L ernic_v3_1_1 -L xilinx_vip -L xpm -L cam_v2_2_2 -L vitis_net_p4_v1_0_2 -L -L axi_protocol_checker_v2_0_8 -L unisims_ver -L unimacro_ver -L secureip --snapshot $top_module_opt reco.rn_tb_2rdma_top reco.glbl -log xsim_elaborate.log
-  else 
-    xelab --incr --relax --debug typical --mt auto -L reco -L ernic_v3_1_1  -L xilinx_vip -L xpm -L cam_v2_2_2 -L vitis_net_p4_v1_0_2 -L -L axi_protocol_checker_v2_0_8 -L unisims_ver -L unimacro_ver -L secureip --snapshot $top_module_opt reco.rn_tb_top reco.glbl -log xsim_elaborate.log
-  fi
+  xelab --incr --relax --debug typical --mt auto $(xil_sim_libs) --snapshot $top_module_opt reco.$top_module_name reco.glbl -log xsim_elaborate.log
 
   # Simulate
   if [[ $2 == "off" ]]; then

@@ -12,7 +12,7 @@
 # Compiler and flags
 CC = gcc
 CFLAGS = -Wall -Werror
-LDFLAGS = -L../../lib
+LDFLAGS = -L../../sw/lib
 LDLIBS = -lreconic
 
 # Directories
@@ -25,7 +25,7 @@ SRCS = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 # Library path
-LIB_INCLUDE = -I../../lib
+LIB_INCLUDE = -I../../sw/lib
 
 # Generate target names from source file names
 TARGETS = $(patsubst $(SRC_DIR)/%.c,$(BIN_DIR)/%,$(SRCS))

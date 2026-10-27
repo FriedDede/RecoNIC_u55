@@ -33,11 +33,11 @@ if {[string equal $ip ""]} {
   exit
 }
 
+# Default to the board files shipped with open-nic-shell
 if {[string equal $board_repo ""]} {
-  puts "INFO: if showing board_part definition error, please provide \"board_repo\" in the command line to indicate Xilinx board repo path"
-} else {
-  set_param board.repoPaths $board_repo
+  set board_repo [file normalize ../../hw/open-nic-shell/board_files]
 }
+set_param board.repoPaths $board_repo
 
 set vivado_version 2021.2
 set board au250
@@ -45,13 +45,25 @@ set part xcu250-figd2104-2l-e
 set board_part xilinx.com:au250:part0:1.3
 
 set root_dir [file normalize ../..]
-set ip_src_dir $root_dir/shell/plugs/rdma_onic_plugin
+set ip_src_dir $root_dir/hw/reconic/plugs/rdma_onic_plugin
 set sim_dir $root_dir/sim
+# IP scripts, first match wins: sim-only ones, then those shared with the build
+set ip_tcl_dirs [list $sim_dir/tcl $root_dir/hw/reconic/plugs/rdma_onic_plugin/vivado_ip \
+                      $root_dir/hw/open-nic-shell/src/rdma_subsystem/vivado_ip]
+proc source_ip_tcl {ip} {
+  foreach d $::ip_tcl_dirs {
+    if {[file exists $d/${ip}.tcl]} {
+      uplevel #0 [list source $d/${ip}.tcl]
+      return
+    }
+  }
+  error "ERROR: no IP script for $ip in $::ip_tcl_dirs"
+}
 set build_dir $sim_dir/build
 set ip_build_dir $build_dir/ip
 set build_managed_ip_dir $build_dir/managed_ip
-set ip_src $root_dir/shell/plugs/rdma_onic_plugin
-set p4_dir $root_dir/shell/packet_classification
+set ip_src $root_dir/hw/reconic/plugs/rdma_onic_plugin
+set p4_dir $root_dir/hw/reconic/packet_classification
 
 file mkdir $ip_build_dir
 file mkdir $build_managed_ip_dir
@@ -65,12 +77,10 @@ create_project -force managed_ip_project $build_managed_ip_dir -part $part
 set_property BOARD_PART $board_part [current_project]
 
 set xci_file ${ip_build_dir}/$ip/$ip.xci
-source ${ip_src_dir}/vivado_ip/${ip}.tcl
+source_ip_tcl $ip
 
+# Simulation only needs the generated HDL, no out-of-context synthesis
 generate_target all [get_files  $xci_file]
-create_ip_run [get_files -of_objects [get_fileset sources_1] $xci_file]
-launch_runs ${ip}_synth_1 -jobs 8
-wait_on_run ${ip}_synth_1
 puts "INFO: $ip is generated"
 
 puts "INFO: ${ip} for simulation is generated"

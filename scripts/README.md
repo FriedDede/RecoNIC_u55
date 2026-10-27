@@ -38,7 +38,7 @@ bitstream loaded this way is lost on the next cold reboot.
 | `project` | Creates the project only (no synthesis or implementation) |
 | `clean` | Deletes `build/<BOARD>/` |
 
-Sources are used in place from `base_nics/open-nic-shell/src`; nothing is
+Sources are used in place from `hw/open-nic-shell/src` and `hw/reconic`; nothing is
 copied. Vivado output goes to `build/<BOARD>/`. An existing project is
 recreated without prompting.
 
@@ -74,7 +74,7 @@ Override any of these on the command line, e.g. `make build_nic JOBS=16`.
 | `JOBS` | `8` | Parallel Vivado jobs |
 | `MAX_PKT_LEN` | `9600` | Maximum packet length |
 | `OVERWRITE` | `0` | `1` regenerates every IP; `0` reuses IPs already built in `build/<BOARD>/` |
-| `BOOTROM_DIR` | `base_nics/open-nic-shell/src/box_250mhz/reconic/dpa/bootrom_u55` | Directory whose `bootrom.sv` is compiled into the RISC-V compute engine |
+| `BOOTROM_DIR` | `hw/reconic/compute/dpa/bootrom_u55` | Directory whose `bootrom.sv` is compiled into the RISC-V compute engine |
 | `VIVADO` | `vivado` | Vivado executable |
 
 `SYNTH` and `IMPL` are set by the `synth` and `project` targets; you

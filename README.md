@@ -16,109 +16,96 @@ The RDMA engine is responsible for processing RDMA traffic, allowing payload dat
 
 The software encompasses the network stack, consisting of RDMA APIs and network driver to handle non-RDMA traffic (such as TCP/IP, UDP/IP, and ARP). Additionally, the memory driver facilitates seamless memory transfers between the host and RecoNIC memory. Finally, the control driver serves to configure and control various components in the hardware shell.
 
+## Repository Layout
+
+```
+hw/
+  open-nic-shell/    OpenNIC shell (QDMA, CMAC, RDMA subsystem, HBM) and its build script
+  reconic/           RecoNIC shell, plugged into open-nic-shell as its box_250mhz module
+    plugs/rdma_onic_plugin/   box_250mhz top, address map, IP scripts, build.tcl
+    top/                      reconic.sv
+    packet_classification/    P4 packet parser and classifier
+    compute/lookside/         lookaside compute logic (HLS systolic-array MM)
+    compute/dpa/              RISC-V compute engine (Snitch cluster) and its bootrom
+    utilities/
+sw/
+  onic-driver/       kernel driver (network + device memory access)
+  regression/        datapath regression tests on the real card
+  lib/               libreconic user-space library
+examples/             RDMA, DMA and matrix-multiply applications
+scripts/              hardware build, MCS generation and FPGA programming (Makefile)
+sim/                  simulation framework (Makefile, testbenches, testcases)
+doc/                  address map and figures
+build/                hardware build output (generated)
+```
+
+Sources are used in place: the hardware build reads `hw/open-nic-shell` and
+`hw/reconic` directly, nothing is copied or patched.
+
 ## System Requirement
 
-* Two servers, each one has an AMD-Xilinx Alveo U250 FPGA board
-* The two AMD-Xilinx Alveo U250 boards can be connected via a 100Gbps cable or through a 100Gbps switch
-* Experiments are tested on machines with Ubuntu 20.04 and linux kernel version 5.4.0-125-generic.
+* Two servers, each with an AMD Alveo U55C board
+* The two boards connected through a 100 Gbps cable or a 100 Gbps switch
 
-## Preliminary Installation
+## Prerequisites
 
-* Vivado 2021.2
-* vitis_net_p4 <br/>
-How to enable vitis_net_p4: (1) before Vivado installation, we need to '$ export VitisNetP4_Option_VISIBLE=true'; (2) When running Vivado installer, you should be able to see the option for Vitis Networking P4. Make sure you select the vitis_net_p4 option.
-* ERNIC license <br/>
-ERNIC license is required in this project. You can either purchase or apply for it through [AMD University Program](https://www.xilinx.com/support/university.html). For further details, please visit [AMD ERNIC](https://www.xilinx.com/products/intellectual-property/ef-di-ernic.html) website.
-* Questa simulator 2021.3 (if available)
-* python >= 3.8
-* [Xilinx Board Store](https://github.com/Xilinx/XilinxBoardStore)
-  ```
-  $ git clone https://github.com/Xilinx/XilinxBoardStore
-  $ export BOARD_REPO=/your/path/to/XilinxBoardStore
-  ```
-* netplan : We are using netplan to configure static IPs for RecoNIC
-* Doxygen
+* Vivado 2024.2, installed with the Vitis Networking P4 option. To make the
+  option visible, run `export VitisNetP4_Option_VISIBLE=true` before starting
+  the installer.
+* ERNIC license. You can purchase it or apply for it through the
+  [AMD University Program](https://www.xilinx.com/support/university.html); see
+  the [AMD ERNIC](https://www.xilinx.com/products/intellectual-property/ef-di-ernic.html) page.
+* Python >= 3.8 with `scapy` and `numpy` (simulation stimulus generation)
+* Questa 2023.4 and a Vivado 2024.2 simulation library compiled for it
+  (optional, for simulation with Questa)
+* A RISC-V toolchain (`riscv64-unknown-elf-`), only to rebuild a compute engine bootrom
+* netplan, to configure static IPs for RecoNIC
+* Doxygen, to generate the library documentation
 
 ## Hardware Generation and Programming
 
-RecoNIC leverages [OpenNIC](https://github.com/Xilinx/open-nic) as its basic NIC shell. To build RecoNIC, we need to first obtain the Open-NIC shell and apply patches to set up the RecoNIC shell.
+The build is driven by [scripts/Makefile](scripts/Makefile); see
+[scripts/README.md](scripts/README.md) for all targets and variables. Vivado
+must be on your `PATH`.
 
-* Obtain the modified OpenNIC shell with the RDMA engine
+* Generate the bitstream
 ```
-$ git submodule update --init base_nics/open-nic-shell
-$ cp -r base_nics/open-nic-shell/board_files/Xilinx/au250 $BOARD_REPO/boards/Xilinx/
-```
-* Integrate RecoNIC into the modified OpenNIC shell and generate bitstream
-```
-$ cd ./scripts
-$ ./gen_base_nic.sh
+$ cd scripts
 $ make build_nic
 ```
-If you encounter the error below, please specify your python version when generating bitstream by "*make PYTHON_EXE=python3.8 build_nic*"
+The Vivado project is created under `build/au55c/open_nic_shell`, and the
+bitstream and debug probes are copied to `build/au55c/bitstream/`. Add
+`OVERWRITE=1` to regenerate all IPs, or `BOOTROM_DIR=<dir>` to compile another
+`bootrom.sv` into the RISC-V compute engine (default:
+`hw/reconic/compute/dpa/bootrom_u55`).
+
+* Program the FPGA
+
+`TARGET_ID` is the hardware target name shown by Vivado under *Hardware
+Manager → Open New Target* (for example `21770297400LA`).
 ```
-...
-  File "../scripts/build_tcl.py", line 82
-    logging.info(f'verilog: {f}')
+# Volatile: load the bitstream over JTAG (lost on cold reboot)
+$ make program_fpga_bit TARGET_ID=<id>
 
-SyntaxError: invalid syntax
+# Persistent: write the configuration flash, then cold-reboot the host
+$ make mcs
+$ make program_fpga_mcs TARGET_ID=<id>
 ```
+Add `REMOTE_HOST=<host>` if the JTAG cable is attached to another machine
+running `hw_server`.
 
-* Program FPGA
-
-&emsp;&emsp;**Using Vivado GUI for FPGA programming**
-
-The system project and its bitstream will be generated under ./smartnics/open-nic-shell/build/au250/open_nic_shell folder. To setup the demo, please download the bitstream to the two FPGA boards according to [AMD Vivado User Guide UG908](https://docs.xilinx.com/r/2022.1-English/ug908-vivado-programming-debugging/Programming-the-Device).
-
-After downloading the bitstream on the FPGA board, you can check whether the board is up by
+After programming, check that the board is up
 ```
 $ lspci | grep Xilinx
 d8:00.0 Memory controller: Xilinx Corporation Device 903f
 ```
 The PCIe BDF (Bus, Device, Function) number and device ID might be different depending on your system.
 
-&emsp;&emsp;**Using scripts for FPGA programming**
-
-*[program_fpga.sh](scripts/program_fpga.sh)* is a bash script used to program FPGA either with *.bit or *.mcs file. In order to use the script, you have to first get the PCIe BDF number and FPGA target device ID/name. You can obtain the FPGA target device name from "Open New Target" under "Open Hardware Manager" of "PROGRAM AND DEBUG" in Vivado GUI. Or you can use this command
-```
-$ echo 'open_hw_manager; connect_hw_server -allow_non_jtag; puts [get_hw_targets]' > temp.tcl && vivado -nolog -nojournal -mode batch -source temp.tcl | grep 'xilinx_tcf/Xilinx/' && rm temp.tcl
-localhost:3121/xilinx_tcf/Xilinx/12345678A01BC
-```
-In this case, the FPGA target device ID/name is "12345678A01BC".
-
-If your jtag cable for programming is connected to the other remote host, then you need to provide IP address or hostname of that remote machine as well. To get the target device ID/name in this case, you can add *connect_hw_server -url $remote_host:3121 -allow_non_jtag;* in the above command, where $remote_host is IP address or hostname of your remote machine. 
-
-The below commands show how to use *program_fpga.sh* to download bitstream on an FPGA board.
-```
-$ cd scripts
-$ ./program_fpga.sh
-Usage:
-  ./program_fpga.sh -b pcie_bdf_num -t target_name [option]
-  Options and arguments:
-  -b, --bdf          PCIe BDF (Bus, Device, Function) number
-  -t, --target_id    FPGA target device name or ID
-  -p, --prog_file    FPGA programming file in "bit" or "mcs" format
-  -r, --remote_host  Remote hostname or IP address used to program FPGA board
-
-Info: This script should be executed locally on a host server with the target FPGA board.
-Info: For mcs programming, user has to provide /your/path/to/your_file.mcs.
-Info: Target ID or target name can be obtained from "Open New Target" under "Open Hardware
-      Manager" of "PROGRAM AND DEBUG" in Vivado GUI
-
-$ ./program_fpga.sh -b d8:00.0 -t target_name -r remote_hostname
-```
-
-### How to generate patches for the hardware shell
-
-We leverage patches to include new changes in the hardware shell. If you want to modify the hardware shell such as adding board support and new features, please refer to this [document](./doc/how_to_gen_a_patch.md) for the instructions.
-
 ## Driver Installation
 
-* Install the modified onic driver
+* Build and load the onic driver
 ```
-$ git submodule update --init drivers/onic-driver
-$ cd ./scripts
-$ ./gen_nic_driver.sh
-$ cd ../drivers/onic-driver
+$ cd sw/onic-driver
 $ make
 $ sudo insmod onic.ko
 ```
@@ -202,20 +189,24 @@ PING 192.100.51.1 (192.100.51.1) 56(84) bytes of data.
 
 If everything works fine, it should return similar output from your terminals. After verifying, you can stop *ping*. The system is now up.
 
+To check the datapath (ICMP, UDP and TCP, with every byte verified) after a
+change to the shell, the P4 classifier or the driver, use the regression tests
+in [sw/regression](sw/regression/README.md).
+
 ## RecoNIC user-space library
 RecoNIC user-space library (green boxes shown in the above RecoNIC system overview figure) contains all necessary APIs for RDMA, memory and control operations. To obtain the document for source codes, you can simply run with
 ```
-$ cd ./lib
+$ cd ./sw/lib
 $ doxygen
 ```
-The source code documents will be generated at ./lib/html.
+The source code documents will be generated at ./sw/lib/html.
 
 Before we run test cases and applications, we need to build the libreconic library.
 ```
 $ make
-$ export LD_LIBRARY_PATH=/your/path/to/RecoNIC/lib:$LD_LIBRARY_PATH
+$ export LD_LIBRARY_PATH=/your/path/to/RecoNIC/sw/lib:$LD_LIBRARY_PATH
 ```
-The generated static, *libreconic.a*, and shared library, *libreconic.so*, are located at ./lib folder. We are ready to play test cases and applications.
+The generated static, *libreconic.a*, and shared library, *libreconic.so*, are located at ./sw/lib folder. We are ready to play test cases and applications.
 
 ## RDMA Test Cases
 The *rdma_test* folder contains RDMA read, write and send/receive test cases using libreconic.
@@ -309,7 +300,7 @@ In the current implementation, we have [matrix multiplication](examples/network_
 
 **Execution flow**: The local host first issues two RDMA read requests to the remote peer for acquiring array A and B and store it in the device memory. Once detecting the readiness of the two arrays, the local host issues a compute control command to the Compute Logic to start computation. Once the computation is finished, the host reads the result back to the host memory for verification.
 
-The [hardware implementation](shell/compute/lookside) of the MM computation is a systolic-array version and written in HLS C from the [Vitis_Accel_Examples](https://github.com/Xilinx/Vitis_Accel_Examples/blob/master/cpp_kernels/systolic_array/src/mmult.cpp).
+The [hardware implementation](hw/reconic/compute/lookside) of the MM computation is a systolic-array version and written in HLS C from the [Vitis_Accel_Examples](https://github.com/Xilinx/Vitis_Accel_Examples/blob/master/cpp_kernels/systolic_array/src/mmult.cpp).
 
 Data (Array A and B) is stored in a server node (Peer 1), while computation is executed in a client node (Peer 2).
 
@@ -348,7 +339,7 @@ $ sudo ./network_systolic_mm -d /dev/reconic-mm -p /sys/bus/pci/devices/0000\:d8
 
 **Peer 2** - Client (192.100.52.1)
 ```
-$ cd software/network_systolic_mm
+$ cd examples/network_systolic_mm
 $ make
 $ sudo ./network_systolic_mm -d /dev/reconic-mm -p /sys/bus/pci/devices/0000\:d8\:00.0/resource2 -r 192.100.52.1 -i 192.100.51.1 -u 22222 -t 11111 --dst_qp 2 -c 2>&1 | tee client_debug.log
 ```
@@ -418,31 +409,58 @@ Calculate total read bandwidth achieved:
 
 ## Hardware Simulation
 
-The simulation framework supports self-testing and regression test. Stimulus, control metadata and golden data are generated from a python script, *packet_gen.py*. User can specify their own json file to generate a new set of testing under *./sim/testcases* folder. The testbenches will automatically read those generated files and construct packets in AXI-streaming format and other control-related signals. The simulation framework can support xsim and questasim.
+The simulation framework supports self-testing and regression testing.
+Stimulus, control metadata and golden data are generated by a Python script,
+*packet_gen.py*, from a JSON description of each testcase under
+[sim/testcases](sim/testcases). The testbenches read the generated files, drive
+packets as AXI-Stream traffic plus the control signals, and check the results
+against the golden data. Both xsim and Questa are supported. Everything is
+driven by [sim/Makefile](sim/Makefile).
 
-Before running the simulation, you have to export "VIVADO_DIR" and the simulation library directory, "COMPILED_LIB_DIR" (Questasim only), into your environment. If you do not know how to compile a simulation library for Vivado, please follow the instructions from [this link](https://support.xilinx.com/s/article/64083?language=en_US).
+The simulation uses the same RTL as the hardware build; the RISC-V compute
+engine file list is generated from the plugin's
+[build.tcl](hw/reconic/plugs/rdma_onic_plugin/build.tcl), so the two stay in
+sync.
+
+1. Prepare the simulation
+
 ```
-$ export VIVADO_DIR=/your/vivado/installation/path/Vivado/2021.2
+$ cd sim
+$ make prepare_sim
+```
+This generates the Vivado IPs under `sim/build/ip`, generates the compute
+engine file lists and checks the Python packages. The IPs are regenerated only
+when one of their scripts or the P4 program changes; add `OVERWRITE=1` to force
+it. `VIVADO_DIR` defaults to the Vivado found in your `PATH`.
+
+2. Run a testcase
+
+```
+# xsim
+$ make sim TC=write
+# Questa
 $ export COMPILED_LIB_DIR=/your/vivado/compiled_lib_dir/for/questasim
+$ make sim TC=write SIM=questasim
+# GUI
+$ make sim TC=read_2rdma SIM=questasim GUI=1
+# every testcase under sim/testcases
+$ make regression SIM=questasim
 ```
+A passing testcase ends with `SUCCESS - Simulation is passed!` in the
+simulator log under `sim/scripts`. `ROCE=0` generates a plain Ethernet
+configuration instead of an RDMA one. `make clean` deletes the simulation
+outputs, and `make distclean` also deletes the generated IPs.
 
-1. Generate vivado IPs
+`COMPILED_LIB_DIR` points to the output of Vivado's `compile_simlib` for
+Questa; see [this article](https://support.xilinx.com/s/article/64083?language=en_US)
+if you need to build it.
 
-```
-$ cd ./sim/scripts
-$ vivado -mode batch -source gen_vivado_ip.tcl
-```
-If the output shows a "board_part definition" error, please provide board_repo path in the command line
-```
-$ vivado -mode batch -source gen_vivado_ip.tcl -tclargs -board_repo $BOARD_REPO
-```
+> **Note:** the RDMA testcases currently run correctly in Questa only. In xsim
+> they compile and elaborate, but the simulation stops making progress after
+> RDMA configuration.
 
-2. Generate stimulus/control/golden data and start simulation<br/>
-The main script is run_testcase.py located at *./sim*. Its usage is shown below.
+The Makefile calls *run_testcase.py*, which can also be used directly from `sim`:
 ```
-# install required python package
-$ pip install scapy
-$ pip install numpy
 $ python run_testcase.py -h
 INFO:run_testcase:Usage:
 INFO:run_testcase:  python run_testcase.py [options] regression,
@@ -455,16 +473,8 @@ INFO:run_testcase:  -no_pktgen : Run testcases without re-generating packets
 INFO:run_testcase:  -no_sim    : Only run analysis on the previous simulation results
 INFO:run_testcase:  -gui       : Use gui mode with the simulator
 ```
-Here is an example showing how to use the script to simulate 'read_2rdma' testcase under ./sim/testcases/read_2rdma folder
-```
-$ cd ../sim
-# start simulation with xsim
-$ python run_testcase.py -roce -tc read_2rdma -gui
-# start simulation with questasim
-$ python run_testcase.py -roce -tc read_2rdma -questasim -gui
-```
 
-User can specify their own configuraiton file to construct a new testcase. The configuration file is in the form of 'json'. Here is an example for generating configuration files for RDMA read operations
+You can write your own configuration file to construct a new testcase. The configuration file is in the form of 'json'. Here is an example for generating configuration files for RDMA read operations
 ```
 {
   "top_module"            : "rn_tb_2rdma_top",
@@ -493,7 +503,9 @@ User can specify their own configuraiton file to construct a new testcase. The c
 ```
 "src_baseaddr_location" is used to specify the source buffer location either at host memory ("sys_mem") or device memory ("dev_mem").
 
-The simulation source code is located at [sim/src](sim/src).
+The testbenches are in [sim/src](sim/src). IP scripts used only by the
+simulation are in [sim/tcl](sim/tcl); the others are shared with the hardware
+build.
 
 ## Citation
 

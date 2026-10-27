@@ -13,7 +13,7 @@
 # Directory variables
 set root_dir [file normalize ..]
 set script_dir ${root_dir}/script
-set nic_dir ${root_dir}/base_nics/open-nic-shell
+set nic_dir ${root_dir}/hw/open-nic-shell
 set default_bitstream ${nic_dir}/build/au55c/bitstream/open_nic_shell.bit
 set default_config_file ${nic_dir}/build/au55c/bitstream/open_nic_shell.ltx
 

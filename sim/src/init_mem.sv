@@ -5,7 +5,11 @@
 //==============================================================================
 `timescale 1ns/1ps
 
-module init_mem (
+module init_mem #(
+  // axis_clk cycles after the memory file is loaded before the simulation is
+  // ended, as a watchdog for testbenches that hang
+  parameter int TIMEOUT_NUM = 1000000
+) (
   input string tag_string,
   input string axi_mem_filename,
 
@@ -83,7 +87,6 @@ end
 
 logic [31:0] timeout_cnt;
 // run for 5ms
-localparam TIMEOUT_NUM = 1000000;
 
 always_ff @(posedge axis_clk) begin
   if(!axis_rstn) begin

@@ -25,7 +25,7 @@ MAIN_IMG 	= $(MAIN:.elf=.img)
 MAIN_SV 	= $(MAIN:.elf=.sv)
 
 # bootrom compiled into the compute engine
-HW_BOOTROM_DIR ?= ../../../base_nics/open-nic-shell/src/box_250mhz/reconic/dpa/bootrom_u55
+HW_BOOTROM_DIR ?= ../../../hw/reconic/compute/dpa/bootrom_u55
 
 .PHONY: all clean install
 

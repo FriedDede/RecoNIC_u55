@@ -36,7 +36,7 @@ this shell does not expose.
 BAR2 must be 8 MB: the box windows sit above 4 MB. With a 4 MB BAR2 (older
 U55C builds) the RecoNIC registers are unreachable and reads return garbage.
 
-Source: [qdma_no_sriov_au55c.tcl](../base_nics/open-nic-shell/src/qdma_subsystem/vivado_ip/qdma_no_sriov_au55c.tcl)
+Source: [qdma_no_sriov_au55c.tcl](../hw/open-nic-shell/src/qdma_subsystem/vivado_ip/qdma_no_sriov_au55c.tcl)
 
 ### BAR2 register space
 
@@ -54,8 +54,8 @@ Source: [qdma_no_sriov_au55c.tcl](../base_nics/open-nic-shell/src/qdma_subsystem
 | `0x400000` | 1 MB | **Box0 @ 250 MHz: RecoNIC** |
 | `0x500000` | 1 MB | Box1 @ 322 MHz |
 
-Source: [system_config_axi_crossbar.tcl](../base_nics/open-nic-shell/src/system_config/vivado_ip/system_config_axi_crossbar.tcl),
-[system_config_address_map.sv](../base_nics/open-nic-shell/src/system_config/system_config_address_map.sv)
+Source: [system_config_axi_crossbar.tcl](../hw/open-nic-shell/src/system_config/vivado_ip/system_config_axi_crossbar.tcl),
+[system_config_address_map.sv](../hw/open-nic-shell/src/system_config/system_config_address_map.sv)
 
 ### RecoNIC (Box0) registers
 
@@ -65,11 +65,11 @@ Source: [system_config_axi_crossbar.tcl](../base_nics/open-nic-shell/src/system_
 | `0x402000` | 4 KB | Statistics and configuration registers | `RN_SCR_*` |
 | `0x403000` | 4 KB | Compute logic: desc_mem, holds the control command | `RN_CLR_*`, `ctl_cmd.h` |
 
-`RN_PC_BASE_ADDRESS` is `0x400000` in [lib/reconic_reg.h](../lib/reconic_reg.h)
+`RN_PC_BASE_ADDRESS` is `0x400000` in [sw/lib/reconic_reg.h](../sw/lib/reconic_reg.h)
 and [examples/systolic_mm/rn_register.h](../examples/systolic_mm/rn_register.h).
 
-Source: [reconic_axil_crossbar.tcl](../base_nics/open-nic-shell/src/box_250mhz/vivado_ip/reconic_axil_crossbar.tcl),
-[reconic_address_map.sv](../base_nics/open-nic-shell/src/box_250mhz/reconic_address_map.sv)
+Source: [reconic_axil_crossbar.tcl](../hw/reconic/plugs/rdma_onic_plugin/vivado_ip/reconic_axil_crossbar.tcl),
+[reconic_address_map.sv](../hw/reconic/plugs/rdma_onic_plugin/reconic_address_map.sv)
 
 ### Device memory
 
@@ -94,8 +94,8 @@ One Snitch core in one cluster (`CORE_NUMBER = 1`, `CLUSTER_NUMBER = 1` in
 - The firmware stack starts at `0xFFFF_FFF0` (device address `0x7FFF_FFF0`)
   and grows down: keep host data away from the top of the first 2 GB.
 
-Source: [compute_engine.sv](../base_nics/open-nic-shell/src/box_250mhz/reconic/dpa/compute_engine.sv),
-[compute_logic_wrapper.sv](../base_nics/open-nic-shell/src/box_250mhz/reconic/lookside/compute_logic_wrapper.sv),
+Source: [compute_engine.sv](../hw/reconic/compute/dpa/compute_engine.sv),
+[compute_logic_wrapper.sv](../hw/reconic/compute/lookside/compute_logic_wrapper.sv),
 [ctl_cmd.h](../examples/systolic_mm/ctl_cmd.h)
 
 ## Device memory (HBM)
@@ -105,7 +105,7 @@ Source: [compute_engine.sv](../base_nics/open-nic-shell/src/box_250mhz/reconic/d
 | `0x0_0000_0000`-`0x1_FFFF_FFFF` | HBM pseudo-channels 0-15 (512 MB each), port SAXI_15 |
 | `0x2_0000_0000`-`0x3_FFFF_FFFF` | HBM pseudo-channels 16-31, port SAXI_16 |
 
-Source: [mem_ctrl/au55c/vivado_ip/hbm_interface.tcl](../base_nics/open-nic-shell/src/mem_ctrl/au55c/vivado_ip/hbm_interface.tcl)
+Source: [mem_ctrl/au55c/vivado_ip/hbm_interface.tcl](../hw/open-nic-shell/src/mem_ctrl/au55c/vivado_ip/hbm_interface.tcl)
 
 Every master reaches the HBM through the 3-to-1 device memory crossbar:
 
@@ -123,6 +123,6 @@ The RDMA engine's memory masters go through a 5-to-2 crossbar: port M00
 SmartConnect decodes only `0x0`-`0x3_FFFF_FFFF`. Check that the `0xA350...`
 high bits are stripped before the HBM before relying on RDMA to device memory.
 
-Source: [sys_mem_5to2_axi_crossbar.tcl](../base_nics/open-nic-shell/src/utility/vivado_ip/sys_mem_5to2_axi_crossbar.tcl),
-[axi_5to2_interconnect_to_sys_mem.sv](../base_nics/open-nic-shell/src/utility/axi_5to2_interconnect_to_sys_mem.sv),
-[axi_3to1_interconnect_to_dev_mem.sv](../base_nics/open-nic-shell/src/utility/axi_3to1_interconnect_to_dev_mem.sv)
+Source: [sys_mem_5to2_axi_crossbar.tcl](../hw/open-nic-shell/src/utility/vivado_ip/sys_mem_5to2_axi_crossbar.tcl),
+[axi_5to2_interconnect_to_sys_mem.sv](../hw/open-nic-shell/src/utility/axi_5to2_interconnect_to_sys_mem.sv),
+[axi_3to1_interconnect_to_dev_mem.sv](../hw/open-nic-shell/src/utility/axi_3to1_interconnect_to_dev_mem.sv)

@@ -106,7 +106,7 @@ logic         m_axi_veri_dev_rvalid;
 logic         m_axi_veri_dev_rready;
 
 // AXI MM interface used to access the device memory
-logic   [1:0] axi_dev_mem_awid;
+logic   [4:0] axi_dev_mem_awid;
 logic  [63:0] axi_dev_mem_awaddr;
 logic   [7:0] axi_dev_mem_awlen;
 logic   [2:0] axi_dev_mem_awsize;
@@ -123,11 +123,11 @@ logic  [63:0] axi_dev_mem_wstrb;
 logic         axi_dev_mem_wlast;
 logic         axi_dev_mem_wvalid;
 logic         axi_dev_mem_wready;
-logic   [1:0] axi_dev_mem_bid;
+logic   [4:0] axi_dev_mem_bid;
 logic   [1:0] axi_dev_mem_bresp;
 logic         axi_dev_mem_bvalid;
 logic         axi_dev_mem_bready;
-logic   [1:0] axi_dev_mem_arid;
+logic   [4:0] axi_dev_mem_arid;
 logic  [63:0] axi_dev_mem_araddr;
 logic   [7:0] axi_dev_mem_arlen;
 logic   [2:0] axi_dev_mem_arsize;
@@ -139,7 +139,7 @@ logic   [3:0] axi_dev_mem_arcache;
 logic   [2:0] axi_dev_mem_arprot;
 logic         axi_dev_mem_arvalid;
 logic         axi_dev_mem_arready;
-logic   [1:0] axi_dev_mem_rid;
+logic   [4:0] axi_dev_mem_rid;
 logic [511:0] axi_dev_mem_rdata;
 logic   [1:0] axi_dev_mem_rresp;
 logic         axi_dev_mem_rlast;
@@ -147,7 +147,7 @@ logic         axi_dev_mem_rvalid;
 logic         axi_dev_mem_rready;
 
 // RDMA AXI MM interface used to store payload from RDMA Read response operation
-logic           axi_compute_logic_awid;
+logic [4:0]     axi_compute_logic_awid;
 logic  [63 : 0] axi_compute_logic_awaddr;
 logic   [3 : 0] axi_compute_logic_awqos;
 logic   [7 : 0] axi_compute_logic_awlen;
@@ -163,11 +163,11 @@ logic           axi_compute_logic_wlast;
 logic           axi_compute_logic_wvalid;
 logic           axi_compute_logic_wready;
 logic           axi_compute_logic_awlock;
-logic           axi_compute_logic_bid;
+logic [4:0]     axi_compute_logic_bid;
 logic   [1 : 0] axi_compute_logic_bresp;
 logic           axi_compute_logic_bvalid;
 logic           axi_compute_logic_bready;
-logic           axi_compute_logic_arid;
+logic [4:0]     axi_compute_logic_arid;
 logic  [63 : 0] axi_compute_logic_araddr;
 logic   [7 : 0] axi_compute_logic_arlen;
 logic   [2 : 0] axi_compute_logic_arsize;
@@ -176,7 +176,7 @@ logic   [3 : 0] axi_compute_logic_arcache;
 logic   [2 : 0] axi_compute_logic_arprot;
 logic           axi_compute_logic_arvalid;
 logic           axi_compute_logic_arready;
-logic           axi_compute_logic_rid;
+logic [4:0]     axi_compute_logic_rid;
 logic [511 : 0] axi_compute_logic_rdata;
 logic   [1 : 0] axi_compute_logic_rresp;
 logic           axi_compute_logic_rlast;
@@ -195,21 +195,6 @@ logic           sys_pc_asserted;
 logic [160-1:0] dev_pc_status;
 logic           dev_pc_asserted;
 
-logic start_config_ctl_cmd;
-
-localparam AXIL_IDLE    = 2'b00;
-localparam AXIL_START   = 2'b01;
-localparam AXIL_GET_CMD = 2'b11;
-
-logic [1:0] state;
-logic [1:0] nextstate;
-logic        ctl_cmd_size_vld;
-logic [31:0] ctl_cmd_size;
-logic [31:0] num_ctl_cmd;
-logic        new_req;
-
-logic [31:0] timeout_cnt;
-logic [31:0] threshold;
 logic start_verification;
 logic stop_counting;
 
@@ -218,34 +203,94 @@ logic [31:0] verification_timeout_cnt;
 
 logic dev_axi_read_passed;
 
-// Initialize data in the device memory
+// Control commands, in the compute logic descriptor memory layout of
+// examples/systolic_mm/ctl_cmd.h. Each command ends with its status word
+// (h2c_work_start); the compute engine firmware runs the job and sets
+// c2h_work_finished, which is polled before the next command is issued
+localparam logic [31:0] CTL_CMD_STATUS_ADDR = 32'h3018;
+localparam CTL_CMD_POLL_INTERVAL = 100;   // axil_clk cycles between status reads
+localparam CTL_CMD_POLL_LIMIT    = 10000; // status reads before giving up
 
-assign start_config_ctl_cmd = init_dev_mem_done;
+task automatic axil_write(input logic [31:0] addr, input logic [31:0] data);
+  @(posedge axil_clk);
+  s_axil_rn_awaddr  <= addr;
+  s_axil_rn_awvalid <= 1'b1;
+  s_axil_rn_wdata   <= data;
+  s_axil_rn_wvalid  <= 1'b1;
+  s_axil_rn_bready  <= 1'b1;
+  fork
+    begin
+      do @(posedge axil_clk); while (!s_axil_rn_awready);
+      s_axil_rn_awvalid <= 1'b0;
+    end
+    begin
+      do @(posedge axil_clk); while (!s_axil_rn_wready);
+      s_axil_rn_wvalid <= 1'b0;
+    end
+  join
+  do @(posedge axil_clk); while (!s_axil_rn_bvalid);
+  s_axil_rn_bready <= 1'b0;
+endtask
 
-// Logic to generate s_axil_rn_* signals
-axil_reg_control config_reg (
-  .rdma_cfg_filename (cl_ctl_cmd_filename),
-  .start_config_rdma (start_config_ctl_cmd),
-  .finish_config_rdma(finish_config_ctl_cmd),
-  .m_axil_reg_awvalid(s_axil_rn_awvalid),
-  .m_axil_reg_awaddr (s_axil_rn_awaddr),
-  .m_axil_reg_awready(s_axil_rn_awready),
-  .m_axil_reg_wvalid (s_axil_rn_wvalid),
-  .m_axil_reg_wdata  (s_axil_rn_wdata),
-  .m_axil_reg_wready (s_axil_rn_wready),
-  .m_axil_reg_bvalid (s_axil_rn_bvalid),
-  .m_axil_reg_bresp  (s_axil_rn_bresp),
-  .m_axil_reg_bready (s_axil_rn_bready),
-  .m_axil_reg_arvalid(s_axil_rn_arvalid),
-  .m_axil_reg_araddr (s_axil_rn_araddr),
-  .m_axil_reg_arready(s_axil_rn_arready),
-  .m_axil_reg_rvalid (s_axil_rn_rvalid),
-  .m_axil_reg_rdata  (s_axil_rn_rdata),
-  .m_axil_reg_rresp  (s_axil_rn_rresp),
-  .m_axil_reg_rready (s_axil_rn_rready),
-  .axil_clk          (axil_clk),
-  .axil_rstn         (axil_rstn)
-);
+task automatic axil_read(input logic [31:0] addr, output logic [31:0] data);
+  @(posedge axil_clk);
+  s_axil_rn_araddr  <= addr;
+  s_axil_rn_arvalid <= 1'b1;
+  s_axil_rn_rready  <= 1'b1;
+  do @(posedge axil_clk); while (!s_axil_rn_arready);
+  s_axil_rn_arvalid <= 1'b0;
+  do @(posedge axil_clk); while (!s_axil_rn_rvalid);
+  data = s_axil_rn_rdata;
+  s_axil_rn_rready <= 1'b0;
+endtask
+
+initial begin
+  int          fd;
+  int          num_cmd;
+  int          num_poll;
+  logic [31:0] addr;
+  logic [31:0] data;
+  logic [31:0] status;
+
+  s_axil_rn_awvalid  = 1'b0;
+  s_axil_rn_awaddr   = '0;
+  s_axil_rn_wvalid   = 1'b0;
+  s_axil_rn_wdata    = '0;
+  s_axil_rn_bready   = 1'b0;
+  s_axil_rn_arvalid  = 1'b0;
+  s_axil_rn_araddr   = '0;
+  s_axil_rn_rready   = 1'b0;
+  start_verification = 1'b0;
+
+  // Matrices A and B are in the device memory
+  wait (init_dev_mem_done);
+
+  fd = $fopen($sformatf("%s.txt", cl_ctl_cmd_filename), "r");
+  if (fd == 0) begin
+    $fatal(1, "ERROR: [cl_tb_top] cannot open %s.txt", cl_ctl_cmd_filename);
+  end
+
+  num_cmd = 0;
+  while ($fscanf(fd, "%h %h\n", addr, data) == 2) begin
+    axil_write(addr, data);
+    if (addr == CTL_CMD_STATUS_ADDR) begin
+      num_poll = 0;
+      do begin
+        repeat (CTL_CMD_POLL_INTERVAL) @(posedge axil_clk);
+        axil_read(CTL_CMD_STATUS_ADDR, status);
+        num_poll++;
+        if (num_poll > CTL_CMD_POLL_LIMIT) begin
+          $fatal(1, "ERROR: [cl_tb_top] time=%0t, control command %0d not finished (status = %08x)", $time, num_cmd, status);
+        end
+      end while (status[31:16] == 16'd0);
+      $display("INFO: [cl_tb_top] time=%0t, control command %0d finished", $time, num_cmd);
+      num_cmd++;
+    end
+  end
+  $fclose(fd);
+
+  start_verification = 1'b1;
+end
 
 // Instantiate rdma_onic_plugin
 rdma_onic_plugin dut (
@@ -360,202 +405,161 @@ rdma_onic_plugin dut (
   .axis_rstn  (axis_rstn)
 );
 
-// AXI crossbar used to access device memory
-axi_interconnect_to_dev_mem axi_interconnect_to_dev_mem_inst(
-  .s_axi_rdma_send_write_payload_awid    (0),
-  .s_axi_rdma_send_write_payload_awaddr  (64'd0),
-  .s_axi_rdma_send_write_payload_awqos   (0),
-  .s_axi_rdma_send_write_payload_awlen   (0),
-  .s_axi_rdma_send_write_payload_awsize  (0),
-  .s_axi_rdma_send_write_payload_awburst (0),
-  .s_axi_rdma_send_write_payload_awcache (0),
-  .s_axi_rdma_send_write_payload_awprot  (0),
-  .s_axi_rdma_send_write_payload_awvalid (0),
-  .s_axi_rdma_send_write_payload_awready (),
-  .s_axi_rdma_send_write_payload_wdata   (512'd0),
-  .s_axi_rdma_send_write_payload_wstrb   (64'd0),
-  .s_axi_rdma_send_write_payload_wlast   (0),
-  .s_axi_rdma_send_write_payload_wvalid  (0),
-  .s_axi_rdma_send_write_payload_wready  (),
-  .s_axi_rdma_send_write_payload_awlock  (0),
-  .s_axi_rdma_send_write_payload_bid     (),
-  .s_axi_rdma_send_write_payload_bresp   (),
-  .s_axi_rdma_send_write_payload_bvalid  (),
-  .s_axi_rdma_send_write_payload_bready  (1'b1),
-  .s_axi_rdma_send_write_payload_arid    (0),
-  .s_axi_rdma_send_write_payload_araddr  (64'd0),
-  .s_axi_rdma_send_write_payload_arlen   (0),
-  .s_axi_rdma_send_write_payload_arsize  (0),
-  .s_axi_rdma_send_write_payload_arburst (0),
-  .s_axi_rdma_send_write_payload_arcache (0),
-  .s_axi_rdma_send_write_payload_arprot  (0),
-  .s_axi_rdma_send_write_payload_arvalid (0),
-  .s_axi_rdma_send_write_payload_arready (),
-  .s_axi_rdma_send_write_payload_rid     (),
-  .s_axi_rdma_send_write_payload_rdata   (),
-  .s_axi_rdma_send_write_payload_rresp   (),
-  .s_axi_rdma_send_write_payload_rlast   (),
-  .s_axi_rdma_send_write_payload_rvalid  (),
-  .s_axi_rdma_send_write_payload_rready  (0),
-  .s_axi_rdma_send_write_payload_arlock  (0),
-  .s_axi_rdma_send_write_payload_arqos   (0),
-
-  .s_axi_rdma_rsp_payload_awid           (0),
-  .s_axi_rdma_rsp_payload_awaddr         (64'd0),
-  .s_axi_rdma_rsp_payload_awqos          (0),
-  .s_axi_rdma_rsp_payload_awlen          (0),
-  .s_axi_rdma_rsp_payload_awsize         (0),
-  .s_axi_rdma_rsp_payload_awburst        (0),
-  .s_axi_rdma_rsp_payload_awcache        (0),
-  .s_axi_rdma_rsp_payload_awprot         (0),
-  .s_axi_rdma_rsp_payload_awvalid        (0),
-  .s_axi_rdma_rsp_payload_awready        (),
-  .s_axi_rdma_rsp_payload_wdata          (512'd0),
-  .s_axi_rdma_rsp_payload_wstrb          (64'd0),
-  .s_axi_rdma_rsp_payload_wlast          (0),
-  .s_axi_rdma_rsp_payload_wvalid         (0),
-  .s_axi_rdma_rsp_payload_wready         (),
-  .s_axi_rdma_rsp_payload_awlock         (0),
-  .s_axi_rdma_rsp_payload_bid            (),
-  .s_axi_rdma_rsp_payload_bresp          (),
-  .s_axi_rdma_rsp_payload_bvalid         (),
-  .s_axi_rdma_rsp_payload_bready         (1'b1),
-  .s_axi_rdma_rsp_payload_arid           (0),
-  .s_axi_rdma_rsp_payload_araddr         (64'd0),
-  .s_axi_rdma_rsp_payload_arlen          (0),
-  .s_axi_rdma_rsp_payload_arsize         (0),
-  .s_axi_rdma_rsp_payload_arburst        (0),
-  .s_axi_rdma_rsp_payload_arcache        (0),
-  .s_axi_rdma_rsp_payload_arprot         (0),
-  .s_axi_rdma_rsp_payload_arvalid        (0),
-  .s_axi_rdma_rsp_payload_arready        (),
-  .s_axi_rdma_rsp_payload_rid            (),
-  .s_axi_rdma_rsp_payload_rdata          (),
-  .s_axi_rdma_rsp_payload_rresp          (),
-  .s_axi_rdma_rsp_payload_rlast          (),
-  .s_axi_rdma_rsp_payload_rvalid         (),
-  .s_axi_rdma_rsp_payload_rready         (0),
-  .s_axi_rdma_rsp_payload_arlock         (0),
-  .s_axi_rdma_rsp_payload_arqos          (0),
-
-  .s_axi_qdma_mm_awid                    (m_axi_init_dev_awid),
-  .s_axi_qdma_mm_awaddr                  (m_axi_init_dev_awaddr),
-  .s_axi_qdma_mm_awqos                   (m_axi_init_dev_awqos),
-  .s_axi_qdma_mm_awlen                   (m_axi_init_dev_awlen),
-  .s_axi_qdma_mm_awsize                  (m_axi_init_dev_awsize),
-  .s_axi_qdma_mm_awburst                 (m_axi_init_dev_awburst),
-  .s_axi_qdma_mm_awcache                 (m_axi_init_dev_awcache),
-  .s_axi_qdma_mm_awprot                  (m_axi_init_dev_awprot),
-  .s_axi_qdma_mm_awvalid                 (m_axi_init_dev_awvalid),
-  .s_axi_qdma_mm_awready                 (m_axi_init_dev_awready),
-  .s_axi_qdma_mm_wdata                   (m_axi_init_dev_wdata),
-  .s_axi_qdma_mm_wstrb                   (m_axi_init_dev_wstrb),
-  .s_axi_qdma_mm_wlast                   (m_axi_init_dev_wlast),
-  .s_axi_qdma_mm_wvalid                  (m_axi_init_dev_wvalid),
-  .s_axi_qdma_mm_wready                  (m_axi_init_dev_wready),
-  .s_axi_qdma_mm_awlock                  (m_axi_init_dev_awlock),
-  .s_axi_qdma_mm_bid                     (m_axi_init_dev_bid),
-  .s_axi_qdma_mm_bresp                   (m_axi_init_dev_bresp),
-  .s_axi_qdma_mm_bvalid                  (m_axi_init_dev_bvalid),
-  .s_axi_qdma_mm_bready                  (m_axi_init_dev_bready),
-  .s_axi_qdma_mm_arid                    (m_axi_veri_dev_arid),
-  .s_axi_qdma_mm_araddr                  (m_axi_veri_dev_araddr),
-  .s_axi_qdma_mm_arlen                   (m_axi_veri_dev_arlen),
-  .s_axi_qdma_mm_arsize                  (m_axi_veri_dev_arsize),
-  .s_axi_qdma_mm_arburst                 (m_axi_veri_dev_arburst),
-  .s_axi_qdma_mm_arcache                 (m_axi_veri_dev_arcache),
-  .s_axi_qdma_mm_arprot                  (m_axi_veri_dev_arprot),
-  .s_axi_qdma_mm_arvalid                 (m_axi_veri_dev_arvalid),
-  .s_axi_qdma_mm_arready                 (m_axi_veri_dev_arready),
-  .s_axi_qdma_mm_rid                     (m_axi_veri_dev_rid),
-  .s_axi_qdma_mm_rdata                   (m_axi_veri_dev_rdata),
-  .s_axi_qdma_mm_rresp                   (m_axi_veri_dev_rresp),
-  .s_axi_qdma_mm_rlast                   (m_axi_veri_dev_rlast),
-  .s_axi_qdma_mm_rvalid                  (m_axi_veri_dev_rvalid),
-  .s_axi_qdma_mm_rready                  (m_axi_veri_dev_rready),
-  .s_axi_qdma_mm_arlock                  (m_axi_veri_dev_arlock),
-  .s_axi_qdma_mm_arqos                   (m_axi_veri_dev_arqos),
-
-  .s_axi_compute_logic_awid              (axi_compute_logic_awid),
-  .s_axi_compute_logic_awaddr            (axi_compute_logic_awaddr),
-  .s_axi_compute_logic_awqos             (axi_compute_logic_awqos),
-  .s_axi_compute_logic_awlen             (axi_compute_logic_awlen),
-  .s_axi_compute_logic_awsize            (axi_compute_logic_awsize),
-  .s_axi_compute_logic_awburst           (axi_compute_logic_awburst),
-  .s_axi_compute_logic_awcache           (axi_compute_logic_awcache),
-  .s_axi_compute_logic_awprot            (axi_compute_logic_awprot),
-  .s_axi_compute_logic_awvalid           (axi_compute_logic_awvalid),
-  .s_axi_compute_logic_awready           (axi_compute_logic_awready),
-  .s_axi_compute_logic_wdata             (axi_compute_logic_wdata),
-  .s_axi_compute_logic_wstrb             (axi_compute_logic_wstrb),
-  .s_axi_compute_logic_wlast             (axi_compute_logic_wlast),
-  .s_axi_compute_logic_wvalid            (axi_compute_logic_wvalid),
-  .s_axi_compute_logic_wready            (axi_compute_logic_wready),
-  .s_axi_compute_logic_awlock            (axi_compute_logic_awlock),
-  .s_axi_compute_logic_bid               (axi_compute_logic_bid),
-  .s_axi_compute_logic_bresp             (axi_compute_logic_bresp),
-  .s_axi_compute_logic_bvalid            (axi_compute_logic_bvalid),
-  .s_axi_compute_logic_bready            (axi_compute_logic_bready),
-  .s_axi_compute_logic_arid              (axi_compute_logic_arid),
-  .s_axi_compute_logic_araddr            (axi_compute_logic_araddr),
-  .s_axi_compute_logic_arlen             (axi_compute_logic_arlen),
-  .s_axi_compute_logic_arsize            (axi_compute_logic_arsize),
-  .s_axi_compute_logic_arburst           (axi_compute_logic_arburst),
-  .s_axi_compute_logic_arcache           (axi_compute_logic_arcache),
-  .s_axi_compute_logic_arprot            (axi_compute_logic_arprot),
-  .s_axi_compute_logic_arvalid           (axi_compute_logic_arvalid),
-  .s_axi_compute_logic_arready           (axi_compute_logic_arready),
-  .s_axi_compute_logic_rid               (axi_compute_logic_rid),
-  .s_axi_compute_logic_rdata             (axi_compute_logic_rdata),
-  .s_axi_compute_logic_rresp             (axi_compute_logic_rresp),
-  .s_axi_compute_logic_rlast             (axi_compute_logic_rlast),
-  .s_axi_compute_logic_rvalid            (axi_compute_logic_rvalid),
-  .s_axi_compute_logic_rready            (axi_compute_logic_rready),
-  .s_axi_compute_logic_arlock            (axi_compute_logic_arlock),
-  .s_axi_compute_logic_arqos             (axi_compute_logic_arqos),
-
-  .m_axi_dev_mem_awaddr                  (axi_dev_mem_awaddr),
-  .m_axi_dev_mem_awprot                  (axi_dev_mem_awprot),
-  .m_axi_dev_mem_awvalid                 (axi_dev_mem_awvalid),
-  .m_axi_dev_mem_awready                 (axi_dev_mem_awready),
-  .m_axi_dev_mem_awsize                  (axi_dev_mem_awsize),
-  .m_axi_dev_mem_awburst                 (axi_dev_mem_awburst),
-  .m_axi_dev_mem_awcache                 (axi_dev_mem_awcache),
-  .m_axi_dev_mem_awlen                   (axi_dev_mem_awlen),
-  .m_axi_dev_mem_awlock                  (axi_dev_mem_awlock),
-  .m_axi_dev_mem_awqos                   (axi_dev_mem_awqos),
-  .m_axi_dev_mem_awregion                (axi_dev_mem_awregion),
-  .m_axi_dev_mem_awid                    (axi_dev_mem_awid),
-  .m_axi_dev_mem_wdata                   (axi_dev_mem_wdata),
-  .m_axi_dev_mem_wstrb                   (axi_dev_mem_wstrb),
-  .m_axi_dev_mem_wvalid                  (axi_dev_mem_wvalid),
-  .m_axi_dev_mem_wready                  (axi_dev_mem_wready),
-  .m_axi_dev_mem_wlast                   (axi_dev_mem_wlast),
-  .m_axi_dev_mem_bresp                   (axi_dev_mem_bresp),
-  .m_axi_dev_mem_bvalid                  (axi_dev_mem_bvalid),
-  .m_axi_dev_mem_bready                  (axi_dev_mem_bready),
-  .m_axi_dev_mem_bid                     (axi_dev_mem_bid),
-  .m_axi_dev_mem_araddr                  (axi_dev_mem_araddr),
-  .m_axi_dev_mem_arprot                  (axi_dev_mem_arprot),
-  .m_axi_dev_mem_arvalid                 (axi_dev_mem_arvalid),
-  .m_axi_dev_mem_arready                 (axi_dev_mem_arready),
-  .m_axi_dev_mem_arsize                  (axi_dev_mem_arsize),
-  .m_axi_dev_mem_arburst                 (axi_dev_mem_arburst),
-  .m_axi_dev_mem_arcache                 (axi_dev_mem_arcache),
-  .m_axi_dev_mem_arlock                  (axi_dev_mem_arlock),
-  .m_axi_dev_mem_arlen                   (axi_dev_mem_arlen),
-  .m_axi_dev_mem_arqos                   (axi_dev_mem_arqos),
-  .m_axi_dev_mem_arregion                (axi_dev_mem_arregion),
-  .m_axi_dev_mem_arid                    (axi_dev_mem_arid),
-  .m_axi_dev_mem_rdata                   (axi_dev_mem_rdata),
-  .m_axi_dev_mem_rresp                   (axi_dev_mem_rresp),
-  .m_axi_dev_mem_rvalid                  (axi_dev_mem_rvalid),
-  .m_axi_dev_mem_rready                  (axi_dev_mem_rready),
-  .m_axi_dev_mem_rlast                   (axi_dev_mem_rlast),
-  .m_axi_dev_mem_rid                     (axi_dev_mem_rid), 
-
-  .axis_aclk   (axis_clk),
-  .axis_arestn (axis_rstn)   
+// AXI crossbar used to access device memory (same one as the hardware:
+// 5-bit IDs, so the compute engine responses keep their IDs)
+axi_3to1_interconnect_to_dev_mem axi_interconnect_to_dev_mem_inst(
+  .s_axi_qdma_mm_awid              (m_axi_init_dev_awid),
+  .s_axi_qdma_mm_awaddr            (m_axi_init_dev_awaddr),
+  .s_axi_qdma_mm_awqos             (m_axi_init_dev_awqos),
+  .s_axi_qdma_mm_awlen             (m_axi_init_dev_awlen),
+  .s_axi_qdma_mm_awsize            (m_axi_init_dev_awsize),
+  .s_axi_qdma_mm_awburst           (m_axi_init_dev_awburst),
+  .s_axi_qdma_mm_awcache           (m_axi_init_dev_awcache),
+  .s_axi_qdma_mm_awprot            (m_axi_init_dev_awprot),
+  .s_axi_qdma_mm_awvalid           (m_axi_init_dev_awvalid),
+  .s_axi_qdma_mm_awready           (m_axi_init_dev_awready),
+  .s_axi_qdma_mm_wdata             (m_axi_init_dev_wdata),
+  .s_axi_qdma_mm_wstrb             (m_axi_init_dev_wstrb),
+  .s_axi_qdma_mm_wlast             (m_axi_init_dev_wlast),
+  .s_axi_qdma_mm_wvalid            (m_axi_init_dev_wvalid),
+  .s_axi_qdma_mm_wready            (m_axi_init_dev_wready),
+  .s_axi_qdma_mm_awlock            (m_axi_init_dev_awlock),
+  .s_axi_qdma_mm_bid               (m_axi_init_dev_bid),
+  .s_axi_qdma_mm_bresp             (m_axi_init_dev_bresp),
+  .s_axi_qdma_mm_bvalid            (m_axi_init_dev_bvalid),
+  .s_axi_qdma_mm_bready            (m_axi_init_dev_bready),
+  .s_axi_qdma_mm_arid              (m_axi_veri_dev_arid),
+  .s_axi_qdma_mm_araddr            (m_axi_veri_dev_araddr),
+  .s_axi_qdma_mm_arlen             (m_axi_veri_dev_arlen),
+  .s_axi_qdma_mm_arsize            (m_axi_veri_dev_arsize),
+  .s_axi_qdma_mm_arburst           (m_axi_veri_dev_arburst),
+  .s_axi_qdma_mm_arcache           (m_axi_veri_dev_arcache),
+  .s_axi_qdma_mm_arprot            (m_axi_veri_dev_arprot),
+  .s_axi_qdma_mm_arvalid           (m_axi_veri_dev_arvalid),
+  .s_axi_qdma_mm_arready           (m_axi_veri_dev_arready),
+  .s_axi_qdma_mm_rid               (m_axi_veri_dev_rid),
+  .s_axi_qdma_mm_rdata             (m_axi_veri_dev_rdata),
+  .s_axi_qdma_mm_rresp             (m_axi_veri_dev_rresp),
+  .s_axi_qdma_mm_rlast             (m_axi_veri_dev_rlast),
+  .s_axi_qdma_mm_rvalid            (m_axi_veri_dev_rvalid),
+  .s_axi_qdma_mm_rready            (m_axi_veri_dev_rready),
+  .s_axi_qdma_mm_arlock            (m_axi_veri_dev_arlock),
+  .s_axi_qdma_mm_arqos             (m_axi_veri_dev_arqos),
+  .s_axi_compute_logic_awid        (axi_compute_logic_awid),
+  .s_axi_compute_logic_awaddr      (axi_compute_logic_awaddr),
+  .s_axi_compute_logic_awqos       (axi_compute_logic_awqos),
+  .s_axi_compute_logic_awlen       (axi_compute_logic_awlen),
+  .s_axi_compute_logic_awsize      (axi_compute_logic_awsize),
+  .s_axi_compute_logic_awburst     (axi_compute_logic_awburst),
+  .s_axi_compute_logic_awcache     (axi_compute_logic_awcache),
+  .s_axi_compute_logic_awprot      (axi_compute_logic_awprot),
+  .s_axi_compute_logic_awvalid     (axi_compute_logic_awvalid),
+  .s_axi_compute_logic_awready     (axi_compute_logic_awready),
+  .s_axi_compute_logic_wdata       (axi_compute_logic_wdata),
+  .s_axi_compute_logic_wstrb       (axi_compute_logic_wstrb),
+  .s_axi_compute_logic_wlast       (axi_compute_logic_wlast),
+  .s_axi_compute_logic_wvalid      (axi_compute_logic_wvalid),
+  .s_axi_compute_logic_wready      (axi_compute_logic_wready),
+  .s_axi_compute_logic_awlock      (axi_compute_logic_awlock),
+  .s_axi_compute_logic_bid         (axi_compute_logic_bid),
+  .s_axi_compute_logic_bresp       (axi_compute_logic_bresp),
+  .s_axi_compute_logic_bvalid      (axi_compute_logic_bvalid),
+  .s_axi_compute_logic_bready      (axi_compute_logic_bready),
+  .s_axi_compute_logic_arid        (axi_compute_logic_arid),
+  .s_axi_compute_logic_araddr      (axi_compute_logic_araddr),
+  .s_axi_compute_logic_arlen       (axi_compute_logic_arlen),
+  .s_axi_compute_logic_arsize      (axi_compute_logic_arsize),
+  .s_axi_compute_logic_arburst     (axi_compute_logic_arburst),
+  .s_axi_compute_logic_arcache     (axi_compute_logic_arcache),
+  .s_axi_compute_logic_arprot      (axi_compute_logic_arprot),
+  .s_axi_compute_logic_arvalid     (axi_compute_logic_arvalid),
+  .s_axi_compute_logic_arready     (axi_compute_logic_arready),
+  .s_axi_compute_logic_rid         (axi_compute_logic_rid),
+  .s_axi_compute_logic_rdata       (axi_compute_logic_rdata),
+  .s_axi_compute_logic_rresp       (axi_compute_logic_rresp),
+  .s_axi_compute_logic_rlast       (axi_compute_logic_rlast),
+  .s_axi_compute_logic_rvalid      (axi_compute_logic_rvalid),
+  .s_axi_compute_logic_rready      (axi_compute_logic_rready),
+  .s_axi_compute_logic_arlock      (axi_compute_logic_arlock),
+  .s_axi_compute_logic_arqos       (axi_compute_logic_arqos),
+  .s_axi_from_sys_crossbar_awid    (0),
+  .s_axi_from_sys_crossbar_awaddr  (0),
+  .s_axi_from_sys_crossbar_awqos   (0),
+  .s_axi_from_sys_crossbar_awlen   (0),
+  .s_axi_from_sys_crossbar_awsize  (0),
+  .s_axi_from_sys_crossbar_awburst (0),
+  .s_axi_from_sys_crossbar_awcache (0),
+  .s_axi_from_sys_crossbar_awprot  (0),
+  .s_axi_from_sys_crossbar_awvalid (0),
+  .s_axi_from_sys_crossbar_awready (),
+  .s_axi_from_sys_crossbar_wdata   (0),
+  .s_axi_from_sys_crossbar_wstrb   (0),
+  .s_axi_from_sys_crossbar_wlast   (0),
+  .s_axi_from_sys_crossbar_wvalid  (0),
+  .s_axi_from_sys_crossbar_wready  (),
+  .s_axi_from_sys_crossbar_awlock  (0),
+  .s_axi_from_sys_crossbar_bid     (),
+  .s_axi_from_sys_crossbar_bresp   (),
+  .s_axi_from_sys_crossbar_bvalid  (),
+  .s_axi_from_sys_crossbar_bready  (0),
+  .s_axi_from_sys_crossbar_arid    (0),
+  .s_axi_from_sys_crossbar_araddr  (0),
+  .s_axi_from_sys_crossbar_arlen   (0),
+  .s_axi_from_sys_crossbar_arsize  (0),
+  .s_axi_from_sys_crossbar_arburst (0),
+  .s_axi_from_sys_crossbar_arcache (0),
+  .s_axi_from_sys_crossbar_arprot  (0),
+  .s_axi_from_sys_crossbar_arvalid (0),
+  .s_axi_from_sys_crossbar_arready (),
+  .s_axi_from_sys_crossbar_rid     (),
+  .s_axi_from_sys_crossbar_rdata   (),
+  .s_axi_from_sys_crossbar_rresp   (),
+  .s_axi_from_sys_crossbar_rlast   (),
+  .s_axi_from_sys_crossbar_rvalid  (),
+  .s_axi_from_sys_crossbar_rready  (0),
+  .s_axi_from_sys_crossbar_arlock  (0),
+  .s_axi_from_sys_crossbar_arqos   (0),
+  .m_axi_dev_mem_awid              (axi_dev_mem_awid),
+  .m_axi_dev_mem_awaddr            (axi_dev_mem_awaddr),
+  .m_axi_dev_mem_awlen             (axi_dev_mem_awlen),
+  .m_axi_dev_mem_awsize            (axi_dev_mem_awsize),
+  .m_axi_dev_mem_awburst           (axi_dev_mem_awburst),
+  .m_axi_dev_mem_awlock            (axi_dev_mem_awlock),
+  .m_axi_dev_mem_awqos             (axi_dev_mem_awqos),
+  .m_axi_dev_mem_awregion          (axi_dev_mem_awregion),
+  .m_axi_dev_mem_awcache           (axi_dev_mem_awcache),
+  .m_axi_dev_mem_awprot            (axi_dev_mem_awprot),
+  .m_axi_dev_mem_awvalid           (axi_dev_mem_awvalid),
+  .m_axi_dev_mem_awready           (axi_dev_mem_awready),
+  .m_axi_dev_mem_wdata             (axi_dev_mem_wdata),
+  .m_axi_dev_mem_wstrb             (axi_dev_mem_wstrb),
+  .m_axi_dev_mem_wlast             (axi_dev_mem_wlast),
+  .m_axi_dev_mem_wvalid            (axi_dev_mem_wvalid),
+  .m_axi_dev_mem_wready            (axi_dev_mem_wready),
+  .m_axi_dev_mem_bid               (axi_dev_mem_bid),
+  .m_axi_dev_mem_bresp             (axi_dev_mem_bresp),
+  .m_axi_dev_mem_bvalid            (axi_dev_mem_bvalid),
+  .m_axi_dev_mem_bready            (axi_dev_mem_bready),
+  .m_axi_dev_mem_arid              (axi_dev_mem_arid),
+  .m_axi_dev_mem_araddr            (axi_dev_mem_araddr),
+  .m_axi_dev_mem_arlen             (axi_dev_mem_arlen),
+  .m_axi_dev_mem_arsize            (axi_dev_mem_arsize),
+  .m_axi_dev_mem_arburst           (axi_dev_mem_arburst),
+  .m_axi_dev_mem_arlock            (axi_dev_mem_arlock),
+  .m_axi_dev_mem_arqos             (axi_dev_mem_arqos),
+  .m_axi_dev_mem_arregion          (axi_dev_mem_arregion),
+  .m_axi_dev_mem_arcache           (axi_dev_mem_arcache),
+  .m_axi_dev_mem_arprot            (axi_dev_mem_arprot),
+  .m_axi_dev_mem_arvalid           (axi_dev_mem_arvalid),
+  .m_axi_dev_mem_arready           (axi_dev_mem_arready),
+  .m_axi_dev_mem_rid               (axi_dev_mem_rid),
+  .m_axi_dev_mem_rdata             (axi_dev_mem_rdata),
+  .m_axi_dev_mem_rresp             (axi_dev_mem_rresp),
+  .m_axi_dev_mem_rlast             (axi_dev_mem_rlast),
+  .m_axi_dev_mem_rvalid            (axi_dev_mem_rvalid),
+  .m_axi_dev_mem_rready            (axi_dev_mem_rready),
+  .axis_aclk                       (axis_clk),
+  .axis_arestn                     (axis_rstn)
 );
 
 // Memory subsytem
@@ -661,7 +665,10 @@ begin
   end
 end
 
-init_mem init_dev_mem (
+// The compute engine runs the matrix multiplication in software: allow ~50 ms
+init_mem #(
+  .TIMEOUT_NUM (10000000)
+) init_dev_mem (
   .tag_string        ("cl"),
   .axi_mem_filename  (cl_init_mem_filename),
 
@@ -740,65 +747,13 @@ initial begin
   forever #(CLK_PERIOD/2) axil_clk = ~axil_clk;
 end
 
-always_comb
-begin
-  ctl_cmd_size_vld = 1'b0;
-  case(state)
-  AXIL_IDLE: begin
-    nextstate = start_config_ctl_cmd ? AXIL_START : AXIL_IDLE;
-  end
-  AXIL_START: begin
-    if(s_axil_rn_wvalid && s_axil_rn_wready) begin
-      ctl_cmd_size_vld = 1'b1;
-      nextstate = AXIL_GET_CMD;
-    end
-  end
-  AXIL_GET_CMD: begin
-    nextstate = finish_config_ctl_cmd ? AXIL_IDLE : AXIL_GET_CMD;;
-  end
-  default: nextstate = AXIL_IDLE;
-  endcase
-end
-
-always_ff @(posedge axil_clk)
-begin
-  if(!axil_rstn) begin
-    ctl_cmd_size <= 32'd0;
-    num_ctl_cmd  <= 32'd0;
-    state <= AXIL_START;
-  end
-  else begin
-    state <= nextstate;
-
-    if(ctl_cmd_size_vld) begin
-      ctl_cmd_size <= s_axil_rn_wdata;
-    end
-
-    if(s_axil_rn_wvalid && s_axil_rn_wready) begin
-      num_ctl_cmd <= num_ctl_cmd + 1;
-    end
-  end
-end
-
 always_ff @(posedge axis_clk)
 begin
   if(!axis_rstn) begin
-    timeout_cnt <= 32'd0;
     verification_timeout_cnt <= 32'd0;
-    start_verification <= 1'b0;
     stop_counting <= 1'b0;
-    threshold <= 32'hffffffff;
   end
   else begin
-    if(timeout_cnt >= threshold) begin
-      start_verification <= 1'b1;
-    end
-
-    if(finish_config_ctl_cmd) begin
-      timeout_cnt <= timeout_cnt + 32'd1;
-      threshold <= num_ctl_cmd*2000;
-    end
-
     if(start_verification && !stop_counting) begin
       verification_timeout_cnt <= verification_timeout_cnt + 1;
     end

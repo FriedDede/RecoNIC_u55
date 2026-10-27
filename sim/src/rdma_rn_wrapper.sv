@@ -267,7 +267,7 @@ module rdma_rn_wrapper (
   output           m_axi_rdma_completion_rready,
   output           m_axi_rdma_completion_arlock,
 
-  output           m_axi_compute_logic_awid,
+  output  [4 : 0] m_axi_compute_logic_awid,
   output  [63 : 0] m_axi_compute_logic_awaddr,
   output   [3 : 0] m_axi_compute_logic_awqos,
   output   [7 : 0] m_axi_compute_logic_awlen,
@@ -283,11 +283,11 @@ module rdma_rn_wrapper (
   output           m_axi_compute_logic_wvalid,
   input            m_axi_compute_logic_wready,
   output           m_axi_compute_logic_awlock,
-  input            m_axi_compute_logic_bid,
+  input   [4 : 0] m_axi_compute_logic_bid,
   input    [1 : 0] m_axi_compute_logic_bresp,
   input            m_axi_compute_logic_bvalid,
   output           m_axi_compute_logic_bready,
-  output           m_axi_compute_logic_arid,
+  output  [4 : 0] m_axi_compute_logic_arid,
   output  [63 : 0] m_axi_compute_logic_araddr,
   output   [7 : 0] m_axi_compute_logic_arlen,
   output   [2 : 0] m_axi_compute_logic_arsize,
@@ -296,7 +296,7 @@ module rdma_rn_wrapper (
   output   [2 : 0] m_axi_compute_logic_arprot,
   output           m_axi_compute_logic_arvalid,
   input            m_axi_compute_logic_arready,
-  input            m_axi_compute_logic_rid,
+  input   [4 : 0] m_axi_compute_logic_rid,
   input  [511 : 0] m_axi_compute_logic_rdata,
   input    [1 : 0] m_axi_compute_logic_rresp,
   input            m_axi_compute_logic_rlast,
@@ -690,6 +690,19 @@ rdma_subsystem_wrapper rdma_subsystem_inst (
   .axil_clk     (axil_aclk),
   .axis_clk     (axis_aclk)
 );
+
+// generic_reset in box_250mhz powers up with its resets released and asserts
+// them only once it has sampled box_rstn low. In hardware the FPGA
+// configuration initializes every register; here, hold the box in reset until
+// generic_reset takes over, so that no IP (e.g. the vitis_net_p4 FIFO checks)
+// runs on uninitialized state
+initial begin
+  force rn_dut.axis_rstn = 1'b0;
+  force rn_dut.axil_rstn = 1'b0;
+  wait (rn_dut.reset_inst.state_slowest_clk == 2'd1); // S_RESET
+  release rn_dut.axis_rstn;
+  release rn_dut.axil_rstn;
+end
 
 // reconic wrapper
 box_250mhz rn_dut (

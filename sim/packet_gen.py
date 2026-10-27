@@ -145,16 +145,28 @@ class pktGenClass:
       control command list for Compute Logic simulation
     """
     assert(ctl_cmd_num <= 8), 'Please reduce number of control command generated (<= 8) or increase size of AXI-BRAM'
-    ctl_cmd_baseaddr = 0x3000 + 0x0
+    # The compute engine firmware (examples/systolic_mm/bootrom_u55) reads one
+    # command from the descriptor memory at the compute logic register base,
+    # laid out as in examples/systolic_mm/ctl_cmd.h. Matrix addresses are in
+    # the compute engine address space: device memory starts at CE_DRAM_BASE.
+    # The status word comes last: it sets h2c_work_start, and the testbench
+    # waits for c2h_work_finished before issuing the next command
+    ctl_cmd_baseaddr = 0x3000
+    ce_dram_base = 0x80000000
     size_ctl_cmd = 6
-    kernel_id = 10
-    a_row_col = ((a_row << 16) & 0xffff0000) | (a_col & 0x0000ffff)
-    b_col_ker_id = ((b_col << 16) & 0xffff0000) | (kernel_id & 0x0000ffff)
+    work_id = 10
+    ctl_cmd_start = 0x00000001
+    a_dim = ((a_row << 16) & 0xffff0000) | (a_col & 0x0000ffff)
+    b_dim = ((b_col << 16) & 0xffff0000) | (work_id & 0x0000ffff)
     step = 3*(a_row*a_col*4)
     for i in range(ctl_cmd_num):
-      tmp_lst = [size_ctl_cmd, a_baseaddr + i*step, b_baseaddr + i*step, c_baseaddr + i*step, a_row_col, b_col_ker_id]
-      for item in tmp_lst:
-        ctl_cmd_str = format(ctl_cmd_baseaddr, "08x") + ' ' + format(item, "08x")
+      tmp_lst = [size_ctl_cmd,
+                 ce_dram_base + a_baseaddr + i*step,
+                 ce_dram_base + b_baseaddr + i*step,
+                 ce_dram_base + c_baseaddr + i*step,
+                 a_dim, b_dim, ctl_cmd_start]
+      for j, item in enumerate(tmp_lst):
+        ctl_cmd_str = format(ctl_cmd_baseaddr + 4*j, "08x") + ' ' + format(item, "08x")
         self.ctl_cmd_lst.append(ctl_cmd_str)
 
   def gen_cl_stimulus(self):

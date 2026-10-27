@@ -8,7 +8,7 @@
 # -- Build the open-nic-shell project (RecoNIC box_250mhz plugin included) and,
 #    optionally, run synthesis / implementation to generate the bitstream.
 #
-#    Sources are used in place from base_nics/open-nic-shell/src: nothing is
+#    Sources are used in place from hw/open-nic-shell/src: nothing is
 #    copied. Vivado output goes to $(BUILD_DIR)/$(BOARD).
 #
 #    make build_nic                 # project + synthesis + implementation
@@ -30,7 +30,7 @@
 
 ROOT_DIR            := $(abspath ..)
 BUILD_DIR           := $(ROOT_DIR)/build
-SMARTNIC_SCRIPT_DIR := $(ROOT_DIR)/base_nics/open-nic-shell/script
+SMARTNIC_SCRIPT_DIR := $(ROOT_DIR)/hw/open-nic-shell/script
 
 BOARD       ?= au55c
 JOBS        ?= 8
@@ -40,7 +40,7 @@ OVERWRITE   ?= 0
 IMPL        ?= 1
 SYNTH       ?= 1
 # Directory of the bootrom.sv compiled into the RISC-V compute engine
-BOOTROM_DIR ?= $(ROOT_DIR)/base_nics/open-nic-shell/src/box_250mhz/reconic/dpa/bootrom_u55
+BOOTROM_DIR ?= $(ROOT_DIR)/hw/reconic/compute/dpa/bootrom_u55
 
 VIVADO      ?= vivado
 

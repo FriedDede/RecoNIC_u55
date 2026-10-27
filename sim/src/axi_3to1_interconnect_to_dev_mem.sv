@@ -256,7 +256,10 @@ assign axi_arqos  [C_QDMA_MM_IDX *4 +: 4]               = s_axi_qdma_mm_arqos;
 
 // AXI slave signals for data access from compute logic
 //assign axi_awid   [C_COMPUTE_LOGIC_IDX *2 +: 2]      = {1'b0, s_axi_compute_logic_awid};
-assign axi_awid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_awvalid ? 5'd4 : 5'd0;
+// compute logic drives the full 5-bit crossbar ID (as in the hardware
+// wrapper); B/R return it unchanged so responses reach the right requester
+// inside the compute engine
+assign axi_awid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_awvalid ? s_axi_compute_logic_awid : 5'd0;
 assign axi_awaddr [C_COMPUTE_LOGIC_IDX *64 +: 64]    = s_axi_compute_logic_awaddr;
 assign axi_awqos  [C_COMPUTE_LOGIC_IDX *4 +: 4]      = s_axi_compute_logic_awqos;
 assign axi_awlen  [C_COMPUTE_LOGIC_IDX *8 +: 8]      = s_axi_compute_logic_awlen;
@@ -277,7 +280,7 @@ assign s_axi_compute_logic_bresp                     = axi_bresp[C_COMPUTE_LOGIC
 assign s_axi_compute_logic_bvalid                    = axi_bvalid[C_COMPUTE_LOGIC_IDX *1 +: 1];
 assign axi_bready [C_COMPUTE_LOGIC_IDX *1 +: 1]      = s_axi_compute_logic_bready;
 //assign axi_arid   [C_COMPUTE_LOGIC_IDX *2 +: 2]      = {1'b0, s_axi_compute_logic_arid};
-assign axi_arid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_arvalid ? 5'd4 : 5'd4;
+assign axi_arid   [C_COMPUTE_LOGIC_IDX *5 +: 5]      = s_axi_compute_logic_arvalid ? s_axi_compute_logic_arid : 5'd0;
 assign axi_araddr [C_COMPUTE_LOGIC_IDX *64 +: 64]    = s_axi_compute_logic_araddr;
 assign axi_arlen  [C_COMPUTE_LOGIC_IDX *8  +: 8]     = s_axi_compute_logic_arlen;
 assign axi_arsize [C_COMPUTE_LOGIC_IDX *3  +: 3]     = s_axi_compute_logic_arsize;
