@@ -17,7 +17,7 @@
 #    make build_nic OVERWRITE=1     # also regenerate all IPs from scratch
 #    make synth BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
 #                                   # use that directory's bootrom.sv
-#    make build_nic CE_CORE=snitch  # snitch compute engine instead of riscv-mini
+#    make build_nic CE_CORE=mini    # riscv-mini (or snitch) compute engine instead of VexRiscv
 #    make build_nic CE_FREQ_CORE=200 CE_FREQ_CLUSTER=100
 #                                   # compute engine clocks in MHz (default 250 / 250)
 #    make mcs                       # convert $(BUILD_DIR)/$(BOARD)/bitstream/
@@ -43,8 +43,8 @@ OVERWRITE   ?= 0
 IMPL        ?= 1
 SYNTH       ?= 1
 # RISC-V compute engine, cores from the riscv-cores submodule:
-# mini (compute_engine_mini) or snitch (compute_engine)
-CE_CORE     ?= mini
+# vex (compute_engine_vex), mini (compute_engine_mini) or snitch (compute_engine_snitch)
+CE_CORE     ?= vex
 # compute engine clocks in MHz (cores, cluster crossbar), generated from the 250 MHz axis_aclk
 CE_FREQ_CORE    ?= 250
 CE_FREQ_CLUSTER ?= 250
@@ -56,7 +56,10 @@ BOOTROM_DIR ?=
 BOOTROM      = $(if $(BOOTROM_DIR),$(abspath $(BOOTROM_DIR))/bootrom.sv,$(CE_BUILD_DIR)/bootrom_$(CE_CORE)/bootrom.sv)
 # riscv-mini Tile, generated from chisel (sbt) by the riscv-cores Makefile
 CE_MINI_RTL  = $(CE_BUILD_DIR)/riscv_mini/Tile.sv
-CE_DEPS      = $(BOOTROM) $(if $(filter mini,$(CE_CORE)),$(CE_MINI_RTL))
+# VexRiscvU55, generated from SpinalHDL (sbt) by the riscv-cores Makefile
+CE_VEX_RTL   = $(CE_BUILD_DIR)/vexriscv/VexRiscvU55.v
+CE_DEPS      = $(BOOTROM) $(if $(filter mini,$(CE_CORE)),$(CE_MINI_RTL)) \
+               $(if $(filter vex,$(CE_CORE)),$(CE_VEX_RTL))
 
 VIVADO      ?= vivado
 PYTHON      ?= python3
@@ -82,7 +85,8 @@ VIVADO_ARGS = -board $(BOARD) -max_pkt_len $(MAX_PKT_LEN) -jobs $(JOBS) \
               -overwrite $(OVERWRITE) -rebuild 1 -synth $(SYNTH) -impl $(IMPL) \
               -bootrom $(BOOTROM) -ce_core $(CE_CORE) \
               -ce_core_freq_mhz $(CE_FREQ_CORE) -ce_cluster_freq_mhz $(CE_FREQ_CLUSTER) \
-              $(if $(filter mini,$(CE_CORE)),-ce_mini_rtl $(CE_MINI_RTL))
+              $(if $(filter mini,$(CE_CORE)),-ce_mini_rtl $(CE_MINI_RTL)) \
+              $(if $(filter vex,$(CE_CORE)),-ce_vex_rtl $(CE_VEX_RTL))
 
 .PHONY: build_nic mcs program_fpga_bit program_fpga_mcs check_target_id synth project clean FORCE
 
@@ -128,6 +132,12 @@ $(CE_BUILD_DIR)/bootrom_%/bootrom.sv: FORCE
 $(CE_MINI_RTL):
 	@test -f $(RISCV_CORES)/hw/cores/riscv-mini/Makefile || \
 	  { echo "Error: no riscv-mini sources, run: git submodule update --init --recursive hw/riscv-cores"; exit 1; }
+	$(MAKE) -C $(RISCV_CORES) BUILD_DIR=$(BUILD_DIR)/$(BOARD) $@
+
+# VexRiscvU55 (riscv-cores Makefile rule $(BUILD_DIR)/<run>/vexriscv/VexRiscvU55.v)
+$(CE_VEX_RTL):
+	@test -f $(RISCV_CORES)/hw/cores/vex/VexRiscv/build.sbt || \
+	  { echo "Error: no VexRiscv sources, run: git submodule update --init --recursive hw/riscv-cores"; exit 1; }
 	$(MAKE) -C $(RISCV_CORES) BUILD_DIR=$(BUILD_DIR)/$(BOARD) $@
 
 clean:

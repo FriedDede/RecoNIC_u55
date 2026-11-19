@@ -74,7 +74,7 @@ Override any of these on the command line, e.g. `make build_nic JOBS=16`.
 | `JOBS` | `8` | Parallel Vivado jobs |
 | `MAX_PKT_LEN` | `9600` | Maximum packet length |
 | `OVERWRITE` | `0` | `1` regenerates every IP; `0` reuses IPs already built in `build/<BOARD>/` |
-| `CE_CORE` | `mini` | RISC-V compute engine cores (from `hw/riscv-cores`): `mini` (riscv-mini, its Tile is generated from chisel with sbt) or `snitch`; cores and cluster at 250 MHz |
+| `CE_CORE` | `vex` | RISC-V compute engine cores (from `hw/riscv-cores`): `vex` (VexRiscv, generated from SpinalHDL with sbt), `mini` (riscv-mini, its Tile is generated from chisel with sbt) or `snitch`; cores and cluster at 250 MHz |
 | `CE_FREQ_CORE` / `CE_FREQ_CLUSTER` | `250` / `250` | Compute engine core and cluster (crossbar) clocks in MHz, from the 250 MHz `axis_aclk`; a change rebuilds the clock IP |
 | `BOOTROM_DIR` | (empty) | Directory whose `bootrom.sv` (module `bootrom`) is compiled into the RISC-V compute engine; empty: `hw/riscv-cores/bootrom_u55` built for `CE_CORE` in `build/<BOARD>/compute_engine` |
 | `VIVADO` | `vivado` | Vivado executable |

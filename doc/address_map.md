@@ -94,7 +94,7 @@ One Snitch core in one cluster (`CORE_NUMBER = 1`, `CLUSTER_NUMBER = 1` in
 - The firmware stack starts at `0xFFFF_FFF0` (device address `0x7FFF_FFF0`)
   and grows down: keep host data away from the top of the first 2 GB.
 
-Source: [compute_engine.sv](../hw/reconic/compute/dpa/compute_engine.sv) (and [compute_engine_mini.sv](../hw/reconic/compute/dpa/compute_engine_mini.sv)),
+Source: [compute_engine_snitch.sv](../hw/reconic/compute/dpa/compute_engine_snitch.sv) (and [compute_engine_vex.sv](../hw/reconic/compute/dpa/compute_engine_vex.sv), [compute_engine_mini.sv](../hw/reconic/compute/dpa/compute_engine_mini.sv)),
 [compute_logic_wrapper.sv](../hw/reconic/compute/lookside/compute_logic_wrapper.sv),
 [ctl_cmd.h](../examples/systolic_mm/ctl_cmd.h)
 

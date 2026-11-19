@@ -72,7 +72,8 @@ set build_root [file normalize ${root_dir}/../../build]
 #   post_impl    Perform post implementation actions
 #   user_plugin  Path to the user plugin repo
 #   bootrom      bootrom.sv for the compute engine (module bootrom, built by scripts/Makefile)
-#   ce_core      compute engine cores from hw/riscv-cores: mini (default) or snitch
+#   ce_core      compute engine cores from hw/riscv-cores: vex (default), mini or snitch
+#   ce_vex_rtl   VexRiscvU55.v generated from SpinalHDL (ce_core vex, built by scripts/Makefile)
 #   ce_mini_rtl  riscv-mini Tile.sv generated from chisel (ce_core mini, built by scripts/Makefile)
 #   ce_core_freq_mhz     compute engine core clock in MHz (xlnx_clk_gen_cluster)
 #   ce_cluster_freq_mhz  compute engine cluster (crossbar) clock in MHz
@@ -101,7 +102,8 @@ array set build_options {
     -post_impl   0
     -user_plugin ""
     -bootrom     ""
-    -ce_core     mini
+    -ce_core     vex
+    -ce_vex_rtl  ""
     -ce_mini_rtl ""
     -ce_core_freq_mhz    250
     -ce_cluster_freq_mhz 250
@@ -148,11 +150,13 @@ foreach {key value} [array get design_params] {
 if {![string equal $bootrom ""]} {
     set bootrom [file normalize $bootrom]
 }
-if {![string equal $ce_mini_rtl ""]} {
-    set ce_mini_rtl [file normalize $ce_mini_rtl]
+foreach v {ce_mini_rtl ce_vex_rtl} {
+    if {![string equal [set $v] ""]} {
+        set $v [file normalize [set $v]]
+    }
 }
-if {[lsearch -exact {snitch mini} $ce_core] < 0} {
-    puts "Invalid value for -ce_core: allowed values are snitch, mini"
+if {[lsearch -exact {vex mini snitch} $ce_core] < 0} {
+    puts "Invalid value for -ce_core: allowed values are vex, mini, snitch"
     exit
 }
 

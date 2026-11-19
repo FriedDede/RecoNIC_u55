@@ -1,19 +1,26 @@
 `include "axi_typedef.svh"
 `include "axi_assign.svh"
 
-// Compute engine, snitch cores (hw/riscv-cores, hw/cores/snitch):
+// Compute engine, VexRiscv cores (hw/riscv-cores, hw/cores/vex):
 // @ input:  ref_clk / ref_areset_n, reference of the cluster clock generators
 // @ output: 64-bit AXI channels to the dram (cache) and to the descriptor memory, one per cluster
-// This module self-contains the RISC-V compute engine and all associated peripherals.
+// Same ports, address map and clocking as compute_engine_snitch, selected with CE_CORE=vex
+// (CE_VEX define in compute_logic_wrapper.sv).
 //
-// Clocking (as in hw/riscv-cores/hw/cluster/tops/u55_snitch_top.sv):
-//   core domain     one clock per core, each core is wrapped in its clock domain (snitch_cd_wrapper)
+// VexRiscv (as in hw/riscv-cores/hw/cluster/tops/u55_vex_top.sv): GenFullNoMmuMaxPerf, RV32IM,
+// reset vector 0x0, I$ and D$ with one AXI master each (ids always 0), CLINT timer and software
+// interrupts, no external interrupts. VexRiscvU55.v is generated from SpinalHDL
+// (make -C hw/riscv-cores <build>/vexriscv/VexRiscvU55.v) and boots from a bootrom built for it
+// (make -C hw/riscv-cores/bootrom_u55 CORE=vex).
+//
+// Clocking (as in u55_vex_top.sv):
+//   core domain     one clock per core, each core is wrapped in its clock domain (vex_cd_wrapper)
 //   cluster domain  one clock per cluster: crossbar, bootrom, clint
 //   output domains  dram_axim_clk / desc_axim_clk, crossed with axi_cdc
 // Every cluster has its own clock generator (cluster_clk_gen, xlnx_clk_gen_cluster IP).
 // The reset is asserted asynchronously and released by a rstgen in each clock domain.
 
-module compute_engine
+module compute_engine_vex
     import dpa_pkg::*;
 (
     input   logic ref_clk, // 250Mhz
@@ -32,25 +39,28 @@ module compute_engine
     input   logic desc_axim_reset_n
 );
 
-localparam BOOT_ADDR            = dpa_pkg::BOOT_ADDR         ;
 localparam CORE_NUMBER          = dpa_pkg::CORE_NUMBER       ;
 localparam CLUSTER_NUMBER       = dpa_pkg::CLUSTER_NUMBER    ;
 localparam DRAM_CH_NUMBER       = dpa_pkg::DRAM_CH_NUMBER    ;
 localparam AxiAddrWidth         = dpa_pkg::ce_AddrWidth      ;
 localparam AxiDataWidth         = dpa_pkg::ce_DataWidth      ;
-localparam AxiIdWidthCore       = dpa_pkg::ce_IdWidthCore    ;
 localparam AxiIdWidthToUncore   = dpa_pkg::ce_IdWidthToUncore;
 localparam AxiUserWidth         = dpa_pkg::ce_UserWidth      ;
+// VexRiscv: two AXI masters per core (I$, D$), 1-bit ids (always 0)
+localparam VexAxiPorts          = 2;
+localparam AxiIdWidthVex        = 1;
+// crossbar slave ports: the crossbar prepends $clog2(VexAxiPorts * CORE_NUMBER) bits, the uncore
+// id width is fixed by dpa_pkg (compute_logic_wrapper, dev-mem crossbar ID budget)
+localparam AxiIdWidthCore       = AxiIdWidthToUncore - $clog2(VexAxiPorts * CORE_NUMBER);
 
-// snitch_cd_wrapper moves the core AXI masters through snitch_cluster_pkg types
-if (AxiIdWidthCore != snitch_cluster_pkg::NarrowIdWidthIn) begin : gen_id_width_check
-    $error("dpa_pkg::ce_IdWidthCore (%0d) != snitch_cluster_pkg::NarrowIdWidthIn (%0d)",
-           AxiIdWidthCore, snitch_cluster_pkg::NarrowIdWidthIn);
+if (AxiIdWidthCore < AxiIdWidthVex) begin : gen_id_width_check
+    $error("compute_engine_vex: %0d cores (%0d AXI masters) do not fit in %0d uncore id bits",
+           CORE_NUMBER, VexAxiPorts * CORE_NUMBER, AxiIdWidthToUncore);
 end
 
 // xbar config
 localparam axi_pkg::xbar_cfg_t xbar_cfg = '{
-    NoSlvPorts:         3*CORE_NUMBER,
+    NoSlvPorts:         VexAxiPorts * CORE_NUMBER,
     NoMstPorts:         4,
     MaxMstTrans:        16,
     MaxSlvTrans:        16,
@@ -65,10 +75,10 @@ localparam axi_pkg::xbar_cfg_t xbar_cfg = '{
     NoAddrRules:        4
 };
 
-// generate the address map
+// generate the address map (same as compute_engine_snitch)
 typedef axi_pkg::xbar_rule_32_t  rule_t;
 function rule_t [3:0] addr_map_gen ();
-    // rom address 0x0 -> 0xffff
+    // rom address 0x0 -> 0xffff (VexRiscv resets at 0x0)
     addr_map_gen[0] = rule_t'{
         idx:        unsigned'(0),
         start_addr: 32'h0000_0000,
@@ -118,7 +128,7 @@ AXI_BUS #(
 ) axi_cdc2out_dram[DRAM_CH_NUMBER-1:0](), axi_cdc2out_desc[DRAM_CH_NUMBER-1:0]();
 
 // clocking and reset declaration: core and cluster (crossbar) domains,
-// the core resets are generated inside the snitch_cd_wrapper
+// the core resets are generated inside the vex_cd_wrapper
 logic [CLUSTER_NUMBER-1:0][CORE_NUMBER-1:0] clk_core;
 logic [CLUSTER_NUMBER-1:0]                  clk_cluster, rst_cluster_n, cluster_locked;
 (* keep = "true" *) logic ce_rst_async_n;
@@ -130,7 +140,7 @@ assign ce_rst_async_n = ref_areset_n & (&cluster_locked);
 // Clusters
 // ---------------
 
-for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
+for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : vex_cluster_gen
 
     // cluster clock generator: crossbar clock and one clock per core
     cluster_clk_gen #(
@@ -150,44 +160,64 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .init_no      (                    ) // keep open
     );
 
-    logic [CORE_NUMBER-1:0] timer_irq;
-    logic [CORE_NUMBER-1:0] ipi;
+    // CLINT interrupts, cluster domain (synchronized in the vex_cd_wrapper)
+    logic [CORE_NUMBER-1:0] timer_irq, ipi;
 
+    // crossbar slave ports: core j I$ at 2*j, D$ at 2*j+1
     AXI_BUS #(
         .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
         .AXI_DATA_WIDTH ( AxiDataWidth     ),
         .AXI_ID_WIDTH   ( AxiIdWidthCore   ),
         .AXI_USER_WIDTH ( AxiUserWidth     )
-    ) axi_snitch2mux[(3*CORE_NUMBER) - 1 : 0]();
+    ) axi_vex2xbar[VexAxiPorts * CORE_NUMBER - 1 : 0]();
 
     for ( genvar j=0; j<CORE_NUMBER; ++j) begin  : core_gen
-        // hart id = core index in the cluster, no plic (no external interrupts)
-        snitch_pkg::interrupts_t core_irq;
-        assign core_irq = '{
-            debug: 1'b0,
-            meip:  1'b0,
-            mtip:  timer_irq[j],
-            msip:  ipi[j],
-            mcip:  1'b0
-        };
-        snitch_cd_wrapper #(
+        AXI_BUS #(
+            .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
+            .AXI_DATA_WIDTH ( AxiDataWidth     ),
+            .AXI_ID_WIDTH   ( AxiIdWidthVex    ),
+            .AXI_USER_WIDTH ( AxiUserWidth     )
+        ) axi_vex[VexAxiPorts-1:0]();
+
+        // enumeration restarts in each cluster: hart id = core index in the cluster
+        vex_cd_wrapper #(
             .AxiAddrWidth   ( AxiAddrWidth   ),
             .AxiDataWidth   ( AxiDataWidth   ),
             .AxiUserWidth   ( AxiUserWidth   ),
-            .AxiIdWidth     ( AxiIdWidthCore ),
-            .BootAddr       ( BOOT_ADDR      ),
-            .SnitchPMACfg   ( snitch_cluster_pkg::SnitchPMACfg )
-        ) i_snitch (
-            .clk_core_i     ( clk_core[i][j]     ),
-            .clk_cluster_i  ( clk_cluster[i]     ),
-            .rst_cluster_ni ( rst_cluster_n[i]   ),
-            .rst_ni         ( ce_rst_async_n     ),
-            .hart_id_i      ( j                  ),
-            .irq_i          ( core_irq           ),
-            .data_core      ( axi_snitch2mux[0 + (3*j)] ),  // integer core lsu
-            .data_fpu       ( axi_snitch2mux[1 + (3*j)] ),  // fpu lsu
-            .inst           ( axi_snitch2mux[2 + (3*j)] )   // icache
+            .AxiIdWidth     ( AxiIdWidthVex  )
+        ) i_vex (
+            .clk_core_i     ( clk_core[i][j]   ),
+            .clk_cluster_i  ( clk_cluster[i]   ),
+            .rst_cluster_ni ( rst_cluster_n[i] ),
+            .rst_ni         ( ce_rst_async_n   ),
+            .hart_id_i      ( 32'(j)           ),
+            .timer_irq_i    ( timer_irq[j]     ),
+            .soft_irq_i     ( ipi[j]           ),
+            .ext_irq_i      ( 1'b0             ),
+            .ibus           ( axi_vex[0]       ),
+            .dbus           ( axi_vex[1]       )
         );
+
+        // 1-bit core ids -> crossbar slave port ids, zero extended (no remapping logic)
+        for (genvar k = 0; k < VexAxiPorts; ++k) begin : gen_iw
+            axi_iw_converter_intf #(
+                .AXI_SLV_PORT_ID_WIDTH        ( AxiIdWidthVex      ),
+                .AXI_MST_PORT_ID_WIDTH        ( AxiIdWidthCore     ),
+                .AXI_SLV_PORT_MAX_UNIQ_IDS    ( 2**AxiIdWidthVex   ),
+                .AXI_SLV_PORT_MAX_TXNS_PER_ID ( 4                  ),
+                .AXI_SLV_PORT_MAX_TXNS        ( 8                  ),
+                .AXI_MST_PORT_MAX_UNIQ_IDS    ( 2**AxiIdWidthVex   ),
+                .AXI_MST_PORT_MAX_TXNS_PER_ID ( 4                  ),
+                .AXI_ADDR_WIDTH               ( AxiAddrWidth       ),
+                .AXI_DATA_WIDTH               ( AxiDataWidth       ),
+                .AXI_USER_WIDTH               ( AxiUserWidth       )
+            ) i_iw_converter (
+                .clk_i  ( clk_cluster[i]                       ),
+                .rst_ni ( rst_cluster_n[i]                     ),
+                .slv    ( axi_vex[k]                           ),
+                .mst    ( axi_vex2xbar[VexAxiPorts * j + k]    )
+            );
+        end : gen_iw
     end : core_gen
 
     AXI_BUS #(
@@ -211,7 +241,7 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .clk_i(clk_cluster[i]),
         .rst_ni(rst_cluster_n[i]),
         .test_i('0),
-        .slv_ports(axi_snitch2mux),
+        .slv_ports(axi_vex2xbar),
         .mst_ports(axi_xbar2uncore),
         .addr_map_i(AddrMapUncore),
         .en_default_mst_port_i('0),
@@ -226,7 +256,7 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
     `AXI_ASSIGN(axi_rom, axi_xbar2uncore[0])
     `AXI_ASSIGN(axi_clint, axi_xbar2uncore[3])
 
-    // CLINT
+    // CLINT: mtime / mtimecmp, timer and software interrupts of the cores
     logic rtc;
     always_ff @(posedge clk_cluster[i] or negedge rst_cluster_n[i]) begin
         if (~rst_cluster_n[i]) begin
@@ -277,7 +307,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .mem_rvalid_i( rom_rvalid),
         .mem_rdata_i ( rom_rdata)
     );
-    // module of the -bootrom build option (bootrom.sv, gen_rom.py names the module as the file)
+    // module of the -bootrom build option, an rv32im bootrom with the code at 0x0
+    // (bootrom_u55 CORE=vex, renamed to bootrom.sv by scripts/Makefile)
     bootrom i_bootrom (
         .clk_i      ( clk_cluster[i] ),
         .req_i      ( rom_req   ),
@@ -285,7 +316,7 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .rdata_o    ( rom_rdata ),
         .rvalid_o   ( rom_rvalid)
     );
-end : snitch_cluster_gen
+end : vex_cluster_gen
 
 // -----------------
 // OUTPUT CDC

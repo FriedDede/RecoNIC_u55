@@ -26,7 +26,7 @@ hw/
     top/                      reconic.sv
     packet_classification/    P4 packet parser and classifier
     compute/lookside/         lookaside compute logic (HLS systolic-array MM)
-    compute/dpa/              RISC-V compute engine tops (snitch, riscv-mini) and dpa_pkg
+    compute/dpa/              RISC-V compute engine tops (VexRiscv, riscv-mini, snitch) and dpa_pkg
     compute/cache_subsystem/  dram cache in front of the compute engine
   riscv-cores/       submodule: RISC-V cores, PULP infrastructure, clock-domain wrappers, bootrom_u55
     utilities/
@@ -77,8 +77,8 @@ $ make build_nic
 ```
 The Vivado project is created under `build/au55c/open_nic_shell`, and the
 bitstream and debug probes are copied to `build/au55c/bitstream/`. Add
-`OVERWRITE=1` to regenerate all IPs, `CE_CORE=snitch` to use the snitch compute
-engine instead of riscv-mini (default, cores and cluster at 250 MHz), or `BOOTROM_DIR=<dir>` to compile another `bootrom.sv` into
+`OVERWRITE=1` to regenerate all IPs, `CE_CORE=mini` or `CE_CORE=snitch` to use the riscv-mini
+or snitch compute engine instead of VexRiscv (default, cores and cluster at 250 MHz), or `BOOTROM_DIR=<dir>` to compile another `bootrom.sv` into
 the RISC-V compute engine (default: `hw/riscv-cores/bootrom_u55` built for `CE_CORE`
 under `build/au55c/compute_engine`). The cores come from the `hw/riscv-cores`
 submodule: `git submodule update --init --recursive hw/riscv-cores`.
@@ -440,18 +440,19 @@ it. `VIVADO_DIR` defaults to the Vivado found in your `PATH`.
 2. Run a testcase
 
 ```
-# xsim
-$ make sim TC=write
-# Questa
+# Questa (default)
 $ export COMPILED_LIB_DIR=/your/vivado/compiled_lib_dir/for/questasim
-$ make sim TC=write SIM=questasim
+$ make sim TC=write
 # GUI
-$ make sim TC=read_2rdma SIM=questasim GUI=1
+$ make sim TC=read_2rdma GUI=1
 # every testcase under sim/testcases
-$ make regression SIM=questasim
+$ make regression
+# Vivado xsim
+$ make sim TC=write SIM=xsim
 ```
 A passing testcase ends with `SUCCESS - Simulation is passed!` in the
-simulator log under `sim/scripts`. `ROCE=0` generates a plain Ethernet
+simulator log under `sim/build/<SIM>` (`questasim` or `xsim`), which also holds the
+compiled libraries, waveforms and testcase data. `ROCE=0` generates a plain Ethernet
 configuration instead of an RDMA one. `make clean` deletes the simulation
 outputs, and `make distclean` also deletes the generated IPs.
 

@@ -59,7 +59,12 @@ module rtl_bram #(
     // A plain single-port BRAM never stalls a request.
     assign mem_gnt = 1'b1;
 
-    (* ram_style = "block" *) logic [DATA_WIDTH-1:0] mem [NUM_WORDS-1:0];
+    // Zero at power-up, as the FPGA block RAM (Vivado maps it to the BRAM init
+    // values). Without it the simulation reads X until the first write: the
+    // compute engine firmware polls the desc_mem status word before the host
+    // writes it, and an X status is taken as a start command. A declaration
+    // initializer, not an initial block: mem is driven only by the always_ff.
+    (* ram_style = "block" *) logic [DATA_WIDTH-1:0] mem [NUM_WORDS-1:0] = '{default: '0};
     logic [CACHE_ADDR_WIDTH-BANK_ADDR_LSB-1:0] mem_word_addr;
     assign mem_word_addr = mem_addr[CACHE_ADDR_WIDTH-1:BANK_ADDR_LSB];
 

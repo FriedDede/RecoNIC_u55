@@ -18,13 +18,15 @@ add_files -norecurse [glob ${shell_dir}/compute/lookside/kernel/*.v]
 # Compute engine: RTL from the riscv-cores submodule (hw/riscv-cores) and
 # compute/{dpa,cache_subsystem}, listed in dependency order by
 # compute/gen_ce_filelist.py (also used by the simulation)
-#   -ce_core      mini (compute_engine_mini, default) or snitch (compute_engine)
+#   -ce_core      vex (compute_engine_vex, default), mini (compute_engine_mini)
+#                 or snitch (compute_engine_snitch)
 #   -bootrom      bootrom.sv of the compute engine (module bootrom)
+#   -ce_vex_rtl   VexRiscvU55.v, generated from SpinalHDL (-ce_core vex)
 #   -ce_mini_rtl  riscv-mini Tile.sv, generated from chisel (-ce_core mini)
-# scripts/Makefile builds the bootrom and the riscv-mini Tile.
+# scripts/Makefile builds the bootrom and the VexRiscv / riscv-mini rtl.
 # ------------------------------------------------------------------
 if {![info exists ce_core] || [string equal $ce_core ""]} {
-    set ce_core mini
+    set ce_core vex
 }
 if {![info exists bootrom] || [string equal $bootrom ""]} {
     error "ERROR: \[ce\] no bootrom: pass -bootrom <bootrom.sv> (scripts/Makefile builds one)"
@@ -35,6 +37,12 @@ if {[string equal $ce_core mini]} {
         error "ERROR: \[ce\] -ce_core mini needs -ce_mini_rtl <Tile.sv> (scripts/Makefile builds it)"
     }
     lappend ce_gen_args -mini-rtl [file normalize $ce_mini_rtl]
+}
+if {[string equal $ce_core vex]} {
+    if {![info exists ce_vex_rtl] || [string equal $ce_vex_rtl ""]} {
+        error "ERROR: \[ce\] -ce_core vex needs -ce_vex_rtl <VexRiscvU55.v> (scripts/Makefile builds it)"
+    }
+    lappend ce_gen_args -vex-rtl [file normalize $ce_vex_rtl]
 }
 if {[catch {exec python3 -I ${shell_dir}/compute/gen_ce_filelist.py {*}$ce_gen_args 2>@1} ce_gen_log]} {
     error "ERROR: \[ce\] gen_ce_filelist.py failed:\n$ce_gen_log"
@@ -51,8 +59,10 @@ set ce_hdl [ce_read_list ${top_build_dir}/ce_filelist/dpa.f]
 set ce_inc [ce_read_list ${top_build_dir}/ce_filelist/dpa_inc.f]
 add_files -norecurse $ce_hdl
 set_property include_dirs [concat [get_property include_dirs [current_fileset]] $ce_inc] [current_fileset]
-# compute_logic_wrapper.sv instantiates compute_engine_mini under CE_MINI
-if {[string equal $ce_core mini]} {
-    set_property verilog_define [concat [get_property verilog_define [current_fileset]] CE_MINI] [current_fileset]
+# compute_logic_wrapper.sv instantiates compute_engine_mini under CE_MINI,
+# compute_engine_vex under CE_VEX, compute_engine_snitch otherwise
+set ce_define [dict get {vex CE_VEX mini CE_MINI snitch {}} $ce_core]
+if {![string equal $ce_define ""]} {
+    set_property verilog_define [concat [get_property verilog_define [current_fileset]] $ce_define] [current_fileset]
 }
 puts "INFO: \[ce\] $ce_core compute engine: [llength $ce_hdl] RTL files, [llength $ce_inc] include dirs, bootrom: $bootrom"

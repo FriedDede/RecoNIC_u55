@@ -4,7 +4,7 @@
 // Compute engine, riscv-mini cores (hw/riscv-cores, hw/cores/riscv-mini):
 // @ input:  ref_clk / ref_areset_n, reference of the cluster clock generators
 // @ output: 64-bit AXI channels to the dram (cache) and to the descriptor memory, one per cluster
-// Same ports, address map and clocking as compute_engine (snitch), selected with CE_CORE=mini
+// Same ports, address map and clocking as compute_engine_snitch, selected with CE_CORE=mini
 // (CE_MINI define in compute_logic_wrapper.sv).
 //
 // riscv-mini (as in hw/riscv-cores/hw/cluster/tops/u55_mini_top.sv): RV32I, reset pc 0x200,
@@ -72,7 +72,7 @@ localparam axi_pkg::xbar_cfg_t xbar_cfg = '{
     NoAddrRules:        4
 };
 
-// generate the address map (same as compute_engine)
+// generate the address map (same as compute_engine_snitch)
 typedef axi_pkg::xbar_rule_32_t  rule_t;
 function rule_t [3:0] addr_map_gen ();
     // rom address 0x0 -> 0xffff (riscv-mini resets at 0x200)

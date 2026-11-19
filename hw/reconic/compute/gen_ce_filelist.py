@@ -13,8 +13,9 @@
 #    The RTL comes from the riscv-cores submodule (hw/riscv-cores), plus the
 #    ReCoNIC sources in hw/reconic/compute:
 #      dpa/dpa_pkg.sv                 compute engine parameters and AXI types
-#      dpa/compute_engine.sv          snitch compute engine   (-core snitch)
+#      dpa/compute_engine_vex.sv      VexRiscv compute engine   (-core vex)
 #      dpa/compute_engine_mini.sv     riscv-mini compute engine (-core mini)
+#      dpa/compute_engine_snitch.sv   snitch compute engine     (-core snitch)
 #      cache_subsystem/               dram cache in front of the compute engine
 #    Only the files reachable from the roots (default: compute_logic_wrapper.sv)
 #    are listed, in dependency order (definitions before users): the module
@@ -26,7 +27,8 @@
 #      dpa.f      RTL files in compile order
 #
 #    gen_ce_filelist.py -tool vivado|xsim|questasim -bootrom <bootrom.sv>
-#                       [-core mini|snitch] [-mini-rtl <Tile.sv>] [-o <dir>]
+#                       [-core vex|mini|snitch] [-vex-rtl <VexRiscvU55.v>]
+#                       [-mini-rtl <Tile.sv>] [-o <dir>]
 #                       [-root <file> ...]
 #
 #    vivado: absolute paths, one per line. xsim/questasim: xvlog/vlog options,
@@ -48,8 +50,9 @@ except ImportError:
            'run: git submodule update --init hw/riscv-cores' % cores_dir)
 
 CE_TOP = {
-  'snitch': os.path.join(compute_dir, 'dpa/compute_engine.sv'),
+  'vex':    os.path.join(compute_dir, 'dpa/compute_engine_vex.sv'),
   'mini':   os.path.join(compute_dir, 'dpa/compute_engine_mini.sv'),
+  'snitch': os.path.join(compute_dir, 'dpa/compute_engine_snitch.sv'),
 }
 DEFAULT_ROOTS = [os.path.join(compute_dir, 'lookside/compute_logic_wrapper.sv')]
 
@@ -64,13 +67,14 @@ def reconic_sources():
   return srcs
 
 
-def collect(core, bootrom, mini_rtl, roots):
+def collect(core, bootrom, core_rtl, roots):
   rel_srcs, rel_hdrs = gf.scan()
   sources = [os.path.join(gf.REPO, s) for s in rel_srcs]
   headers = [os.path.join(gf.REPO, h) for h in rel_hdrs]
   sources += reconic_sources() + [CE_TOP[core], bootrom]
-  if core == 'mini':
-    sources.append(mini_rtl)
+  # generated core rtl: riscv-mini Tile (chisel), VexRiscvU55 (SpinalHDL)
+  if core_rtl:
+    sources.append(core_rtl)
 
   info = {s: gf.parse(s) for s in sources + roots}
   owner = {}
@@ -125,11 +129,13 @@ def collect(core, bootrom, mini_rtl, roots):
 def main():
   ap = argparse.ArgumentParser(description='RISC-V compute engine file lists')
   ap.add_argument('-tool', required=True, choices=['vivado', 'xsim', 'questasim'])
-  ap.add_argument('-core', default='mini', choices=list(CE_TOP))
+  ap.add_argument('-core', default='vex', choices=list(CE_TOP))
   ap.add_argument('-bootrom', required=True,
                   help='bootrom.sv compiled into the compute engine (module bootrom)')
   ap.add_argument('-mini-rtl', default='',
                   help='riscv-mini Tile.sv, generated from chisel (-core mini only)')
+  ap.add_argument('-vex-rtl', default='',
+                  help='VexRiscvU55.v, generated from SpinalHDL (-core vex only)')
   ap.add_argument('-root', action='append', default=[],
                   help='file instantiating the compute engine (default: compute_logic_wrapper.sv)')
   ap.add_argument('-o', default='.', help='output directory')
@@ -138,12 +144,16 @@ def main():
   bootrom = os.path.abspath(args.bootrom)
   if not os.path.isfile(bootrom):
     sys.exit('ERROR: [ce] bootrom not found: ' + args.bootrom)
-  mini_rtl = os.path.abspath(args.mini_rtl) if args.mini_rtl else ''
-  if args.core == 'mini' and not os.path.isfile(mini_rtl):
-    sys.exit('ERROR: [ce] riscv-mini Tile.sv not found: %r (-mini-rtl)' % args.mini_rtl)
+  core_rtl = ''
+  for core, arg, name in (('mini', args.mini_rtl, 'riscv-mini Tile.sv (-mini-rtl)'),
+                          ('vex', args.vex_rtl, 'VexRiscvU55.v (-vex-rtl)')):
+    if args.core == core:
+      core_rtl = os.path.abspath(arg) if arg else ''
+      if not os.path.isfile(core_rtl):
+        sys.exit('ERROR: [ce] %s not found: %r' % (name, arg))
   roots = [os.path.abspath(r) for r in args.root] or DEFAULT_ROOTS
 
-  hdl, inc = collect(args.core, bootrom, mini_rtl, roots)
+  hdl, inc = collect(args.core, bootrom, core_rtl, roots)
 
   out = os.path.abspath(args.o)
   os.makedirs(out, exist_ok=True)

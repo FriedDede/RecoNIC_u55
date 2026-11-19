@@ -40,12 +40,20 @@ xil_sim_libs()
   echo "$libs -L unisims_ver -L unimacro_ver -L secureip"
 }
 
-cur_dir=$(pwd)
-sim_dir=$(dirname $cur_dir)
+sim_script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+sim_dir=$(dirname $sim_script_dir)
 build_dir=${sim_dir}/build
 root_dir=$(dirname $sim_dir)
 sim_src_dir=${sim_dir}/src
-sim_script_dir=${sim_dir}/scripts
+
+# The simulators run in ${build_dir}/<simulator>: compiled libraries, logs,
+# waveforms and the testcase data stay out of sim/scripts
+enter_work_dir()
+{
+  work_dir=${build_dir}/$1
+  mkdir -p $work_dir
+  cd $work_dir
+}
 
 # Questasim main
 run_questasim()
@@ -56,14 +64,15 @@ run_questasim()
   fi
   XIL_LIB_DIR=$COMPILED_LIB_DIR
   UVM_LIB=mtiUvm
+  enter_work_dir questasim
   echo "current directory: $(pwd)"
 
   if [[ ! -d "${build_dir}/questa_lib" ]]; then
     mkdir -p ${build_dir}/questa_lib
   fi
 
-  # Copy modelsim.ini to sim/src
-  cp ${COMPILED_LIB_DIR}/modelsim.ini ${sim_dir}/scripts
+  # library mappings of the precompiled Xilinx libraries
+  cp ${COMPILED_LIB_DIR}/modelsim.ini .
 
   copy_test_data $1
   
@@ -71,7 +80,7 @@ run_questasim()
   top_module_opt="${top_module_name}_opt"
 
   # Compile
-  source questasim_compile.do 2>&1 | tee -a questasim_compile.log
+  source ${sim_script_dir}/questasim_compile.do 2>&1 | tee questasim_compile.log
 
   # Elaborate, reco - RecoNIC work library
   vopt -64 +acc=npr $(xil_sim_libs) -work reco reco.$top_module_name reco.glbl -o $top_module_opt -l questasim_elaborate.log
@@ -90,87 +99,46 @@ run_xsim()
 {
   XIL_LIB_DIR=$VIVADO_DIR/data/xsim/ip
   UVM_LIB=uvm
-  echo "current director: $(pwd)"
+  enter_work_dir xsim
+  echo "current directory: $(pwd)"
+  # library mappings, relative to sim/scripts in xsim.ini
+  sed "s|\.\./build|${build_dir}|" ${sim_script_dir}/xsim.ini > xsim.ini
   copy_test_data $1
 
   top_module_name="$3"
   top_module_opt="${top_module_name}_opt"
 
   # Compile
-  source xsim_compile.do 2>&1 | tee -a xsim_compile.log
+  source ${sim_script_dir}/xsim_compile.do 2>&1 | tee xsim_compile.log
 
   # Elaborate reco
   xelab --incr --relax --debug typical --mt auto $(xil_sim_libs) --snapshot $top_module_opt reco.$top_module_name reco.glbl -log xsim_elaborate.log
 
   # Simulate
   if [[ $2 == "off" ]]; then
-    xsim ${top_module_name}_opt -key {Behavioral:sim_1:Functional:${top_module_name}} -tclbatch xsim_tb_top.tcl -log xsim_simulate.log
+    xsim ${top_module_name}_opt -key {Behavioral:sim_1:Functional:${top_module_name}} -tclbatch ${sim_script_dir}/xsim_tb_top.tcl -log xsim_simulate.log
   else
-    xsim -g $top_module_opt -key {Behavioral:sim_1:Functional:${top_module_name}} -tclbatch xsim_tb_top.tcl -log xsim_simulate.log
+    xsim -g $top_module_opt -key {Behavioral:sim_1:Functional:${top_module_name}} -tclbatch ${sim_script_dir}/xsim_tb_top.tcl -log xsim_simulate.log
   fi
 }
 
 # Copy test data
 copy_test_data()
 {
-  if [[ -f "$sim_script_dir/packets.txt" ]]; then
-    # Remove old test data files
-    rm ${sim_script_dir}/*.txt
-  fi
-
+  # testcase data, read by the testbenches from the working directory
+  rm -f ./*.txt
   if [[ ($1 != "") ]]; then
     test_data_path=${sim_dir}/testcases/"$1"
   fi
   echo "INFO: testcase data path: $test_data_path"
-  cp ${test_data_path}/*.txt ${sim_script_dir}
+  cp ${test_data_path}/*.txt .
 }
 
 clean()
 {
-  if [[ -d "${build_dir}/questa_lib" ]]; then
-    rm -rf ${build_dir}/questa_lib
-    rm ${sim_dir}/scripts/modelsim.ini
-    if [[ -f "${sim_dir}/scripts/transcript" ]]; then
-      rm -rf ${sim_dir}/scripts/transcript
-    fi   
-  fi
-
-  if [[ -d "${build_dir}/xsim.dir" ]]; then
-    rm -rf ${build_dir}/xsim.dir
-
-    if [[ -f "${sim_dir}/scripts/vivado.jou" ]]; then
-      rm -rf ${sim_dir}/scripts/*.jou
-    fi
-
-    if compgen -G "${sim_dir}/scripts/*.jou" > /dev/null; then
-      rm ${sim_dir}/scripts/*.jou
-    fi
-
-    if compgen -G "${sim_dir}/scripts/*.wdb" > /dev/null; then
-      rm ${sim_dir}/scripts/*.wdb
-    fi
-
-    if compgen -G "${sim_dir}/scripts/*.debug" > /dev/null; then
-      rm ${sim_dir}/scripts/*.debug
-    fi
-
-    files_to_remove=(${sim_dir}/scripts/rn_tb_top_opt.wdb ${sim_dir}/scripts/vsim.wlf ${sim_dir}/scripts/xelab.pb ${sim_dir}/scripts/.Xil ${sim_dir}/scripts/xsim.dir ${sim_dir}/scripts/xvhdl.pb ${sim_dir}/scripts/xvlog.pb)
-    for ((i=0; i<${#files_to_remove[*]}; i++)); do
-      file="${files_to_remove[i]}"
-      if [[ -e $file ]]; then
-        rm -rf $file
-      fi
-    done
-  fi
-
-  if compgen -G "${sim_dir}/scripts/*.log" > /dev/null; then
-    rm ${sim_dir}/scripts/*.log
-  fi
-
-  if [[ -f "${sim_dir}/scripts/packets.txt" ]]; then
-    rm ${sim_dir}/scripts/*.txt
-  fi
-
+  # simulator work directories and the Questa libraries; the IPs and the
+  # compute engine sources in ${build_dir} are kept
+  rm -rf ${build_dir}/questasim ${build_dir}/xsim ${build_dir}/questa_lib ${build_dir}/xsim.dir
   echo -e "INFO: Simulation files are deleted.\n"
   exit 0
 }
