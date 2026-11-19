@@ -15,5 +15,5 @@ set ips {
   sys_mem_5to2_axi_crossbar
   packet_parser
   rdma_core
-  xlnx_clk_gen
+  xlnx_clk_gen_cluster
 }

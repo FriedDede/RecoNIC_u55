@@ -24,8 +24,10 @@ MAIN_BIN 	= $(MAIN:.elf=.bin)
 MAIN_IMG 	= $(MAIN:.elf=.img)
 MAIN_SV 	= $(MAIN:.elf=.sv)
 
-# bootrom compiled into the compute engine
-HW_BOOTROM_DIR ?= ../../../hw/reconic/compute/dpa/bootrom_u55
+# bootrom compiled into the compute engine: pass this directory to the hardware build,
+#   make -C scripts build_nic BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
+# or copy bootrom.sv somewhere else with make install HW_BOOTROM_DIR=<dir>
+HW_BOOTROM_DIR ?=
 
 .PHONY: all clean install
 
@@ -60,6 +62,7 @@ all: $(MAIN) $(MAIN_BIN) $(MAIN_IMG) $(MAIN_SV)
 
 # copy the generated ROM into the hardware sources (rebuild the bitstream after)
 install: all
+	@test -n "$(HW_BOOTROM_DIR)" || { echo "set HW_BOOTROM_DIR=<dir>, or build with BOOTROM_DIR=$(CURDIR)"; exit 1; }
 	cp $(MAIN_SV) $(HW_BOOTROM_DIR)/$(MAIN_SV)
 	@echo "installed $(MAIN_SV) -> $(HW_BOOTROM_DIR)"
 

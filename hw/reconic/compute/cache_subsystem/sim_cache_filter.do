@@ -20,15 +20,15 @@ echo "--- Starting Compilation ---"
 # 3. Compile Packages FIRST
 # SystemVerilog requires packages to be compiled before modules that import them.
 # If the PULP AXI library has specific packages, compile them explicitly here:
-vlog -sv -work work +incdir+../axi_pulp/include/axi/ ../axi_pulp/src/axi_pkg.sv
-vlog -sv -work work +incdir+../axi_pulp/include/axi/ ./cache_ss_pkg.sv
+vlog -sv -work work +incdir+../../../riscv-cores/hw/infra/axi_pulp/include/axi/ ../../../riscv-cores/hw/infra/axi_pulp/src/axi_pkg.sv
+vlog -sv -work work +incdir+../../../riscv-cores/hw/infra/axi_pulp/include/axi/ ./cache_ss_pkg.sv
 
 # 4. Compile the AXI PULP directory files
 # +incdir+ allows the compiler to find `include "axi_assign.svh" etc.
-vlog -sv -work work +incdir+../axi_pulp/include/axi/ ../axi_pulp/src/axi_intf.sv
+vlog -sv -work work +incdir+../../../riscv-cores/hw/infra/axi_pulp/include/axi/ ../../../riscv-cores/hw/infra/axi_pulp/src/axi_intf.sv
 
 # 5. Compile the current directory files (Cache controller, DMA, Testbenches)
-vlog -sv -work work +incdir+../axi_pulp/include/axi/ +incdir+. ./*.sv
+vlog -sv -work work +incdir+../../../riscv-cores/hw/infra/axi_pulp/include/axi/ +incdir+. ./*.sv
 
 echo "--- Compilation Complete ---"
 

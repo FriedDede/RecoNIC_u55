@@ -6,5 +6,5 @@
 set ips {
   reconic_axil_crossbar
   packet_parser
-  xlnx_clk_gen
+  xlnx_clk_gen_cluster
 }

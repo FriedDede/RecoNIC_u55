@@ -1,21 +1,20 @@
 `include "axi_typedef.svh"
-`include "common_cells_assertions.svh"
-`include "common_cells_registers.svh"
-`include "snitch_vm_typedef.svh"
 `include "axi_assign.svh"
-`include "axi_typedef.svh"
-`include "register_interface_assign.svh"
-`include "register_interface_typedef.svh"
 
-// Compute engine wrapper:
-// @ input: clk / rst
-// @ output: 64-bit AXI channels to the hbm memory, one per memory channel
-// @ output: uart ? TODO: evaluate if needed
-// This module self-contains the RISC-V compute engine and all associated peripherals
+// Compute engine, snitch cores (hw/riscv-cores, hw/cores/snitch):
+// @ input:  ref_clk / ref_areset_n, reference of the cluster clock generators
+// @ output: 64-bit AXI channels to the dram (cache) and to the descriptor memory, one per cluster
+// This module self-contains the RISC-V compute engine and all associated peripherals.
+//
+// Clocking (as in hw/riscv-cores/hw/cluster/tops/u55_snitch_top.sv):
+//   core domain     one clock per core, each core is wrapped in its clock domain (snitch_cd_wrapper)
+//   cluster domain  one clock per cluster: crossbar, bootrom, clint
+//   output domains  dram_axim_clk / desc_axim_clk, crossed with axi_cdc
+// Every cluster has its own clock generator (cluster_clk_gen, xlnx_clk_gen_cluster IP).
+// The reset is asserted asynchronously and released by a rstgen in each clock domain.
 
-module compute_engine 
-    import snitch_cluster_pkg::*;
-    import dpa_pkg::* ;  
+module compute_engine
+    import dpa_pkg::*;
 (
     input   logic ref_clk, // 250Mhz
     input   logic ref_areset_n,
@@ -30,22 +29,24 @@ module compute_engine
     output  axim64_core2mem_req_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0]  m_axim_desc_req,
     input   axim64_core2mem_resp_t  [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_desc_resp,
     input   logic desc_axim_clk,
-    input   logic desc_axim_reset_n 
-
-    //input  logic          uart_rx         ,
-    //output logic          uart_tx
+    input   logic desc_axim_reset_n
 );
 
 localparam BOOT_ADDR            = dpa_pkg::BOOT_ADDR         ;
 localparam CORE_NUMBER          = dpa_pkg::CORE_NUMBER       ;
 localparam CLUSTER_NUMBER       = dpa_pkg::CLUSTER_NUMBER    ;
-localparam TOTAL_CORE_NUMBER    = dpa_pkg::TOTAL_CORE_NUMBER ;
 localparam DRAM_CH_NUMBER       = dpa_pkg::DRAM_CH_NUMBER    ;
 localparam AxiAddrWidth         = dpa_pkg::ce_AddrWidth      ;
 localparam AxiDataWidth         = dpa_pkg::ce_DataWidth      ;
 localparam AxiIdWidthCore       = dpa_pkg::ce_IdWidthCore    ;
 localparam AxiIdWidthToUncore   = dpa_pkg::ce_IdWidthToUncore;
 localparam AxiUserWidth         = dpa_pkg::ce_UserWidth      ;
+
+// snitch_cd_wrapper moves the core AXI masters through snitch_cluster_pkg types
+if (AxiIdWidthCore != snitch_cluster_pkg::NarrowIdWidthIn) begin : gen_id_width_check
+    $error("dpa_pkg::ce_IdWidthCore (%0d) != snitch_cluster_pkg::NarrowIdWidthIn (%0d)",
+           AxiIdWidthCore, snitch_cluster_pkg::NarrowIdWidthIn);
+end
 
 // xbar config
 localparam axi_pkg::xbar_cfg_t xbar_cfg = '{
@@ -97,100 +98,98 @@ function rule_t [3:0] addr_map_gen ();
     };
 endfunction
 
-
 localparam rule_t [3:0] AddrMapUncore = addr_map_gen();
 
-// axi busses: [DRAM_CH_NUMBER-1:0] clusters
+// axi busses: [CLUSTER_NUMBER-1:0] clusters, cluster domain
 
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
     .AXI_DATA_WIDTH ( AxiDataWidth     ),
     .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
     .AXI_USER_WIDTH ( AxiUserWidth     )
-) axi_cdc2out_dram[DRAM_CH_NUMBER-1:0]();
+) axi_dram[CLUSTER_NUMBER-1:0](), axi_desc[CLUSTER_NUMBER-1:0]();
 
+// output domains
 AXI_BUS #(
     .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
     .AXI_DATA_WIDTH ( AxiDataWidth     ),
     .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
     .AXI_USER_WIDTH ( AxiUserWidth     )
-) axi_dram[DRAM_CH_NUMBER-1:0]();
+) axi_cdc2out_dram[DRAM_CH_NUMBER-1:0](), axi_cdc2out_desc[DRAM_CH_NUMBER-1:0]();
 
-AXI_BUS #(
-    .AXI_ADDR_WIDTH ( dpa_pkg::ce_AddrWidth       ),
-    .AXI_DATA_WIDTH ( dpa_pkg::ce_DataWidth       ),
-    .AXI_ID_WIDTH   ( dpa_pkg::ce_IdWidthToUncore ),
-    .AXI_USER_WIDTH ( dpa_pkg::ce_UserWidth       )
-) axi_cdc2out_desc [dpa_pkg::DRAM_CH_NUMBER-1:0] ();
+// clocking and reset declaration: core and cluster (crossbar) domains,
+// the core resets are generated inside the snitch_cd_wrapper
+logic [CLUSTER_NUMBER-1:0][CORE_NUMBER-1:0] clk_core;
+logic [CLUSTER_NUMBER-1:0]                  clk_cluster, rst_cluster_n, cluster_locked;
+(* keep = "true" *) logic ce_rst_async_n;
 
-AXI_BUS #(
-    .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
-    .AXI_DATA_WIDTH ( AxiDataWidth     ),
-    .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
-    .AXI_USER_WIDTH ( AxiUserWidth     )
-) axi_desc[CLUSTER_NUMBER-1:0]();
-
-// interrupt handling bus
-snitch_pkg::interrupts_t [TOTAL_CORE_NUMBER - 1 : 0] core_irq_i;
-
-// clocking and reset declaration
-logic ce_clk;
-logic internal_ce_rstn;
-logic pll_locked;
-
-logic uncore_areset_n;
-assign uncore_areset_n = internal_ce_rstn;
-
+// the logic is in reset until all the cluster plls lock and the reference reset is released
+assign ce_rst_async_n = ref_areset_n & (&cluster_locked);
 
 // ---------------
-// Core
+// Clusters
 // ---------------
 
 for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
-    
+
+    // cluster clock generator: crossbar clock and one clock per core
+    cluster_clk_gen #(
+        .NumCores      ( CORE_NUMBER       )
+    ) i_cluster_clk_gen (
+        .clk_in1       ( ref_clk           ), // 250 Mhz ref clk
+        .reset         ( ~ref_areset_n     ),
+        .locked        ( cluster_locked[i] ),
+        .clk_cluster_o ( clk_cluster[i]    ),
+        .clk_core_o    ( clk_core[i]       )
+    );
+    rstgen i_rstgen_cluster (
+        .clk_i        ( clk_cluster[i]     ),
+        .rst_ni       ( ce_rst_async_n     ),
+        .test_mode_i  ( '0                 ),
+        .rst_no       ( rst_cluster_n[i]   ),
+        .init_no      (                    ) // keep open
+    );
+
+    logic [CORE_NUMBER-1:0] timer_irq;
+    logic [CORE_NUMBER-1:0] ipi;
+
     AXI_BUS #(
         .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
         .AXI_DATA_WIDTH ( AxiDataWidth     ),
-        .AXI_ID_WIDTH   ( AxiIdWidthCore ),
+        .AXI_ID_WIDTH   ( AxiIdWidthCore   ),
         .AXI_USER_WIDTH ( AxiUserWidth     )
     ) axi_snitch2mux[(3*CORE_NUMBER) - 1 : 0]();
-    
+
     for ( genvar j=0; j<CORE_NUMBER; ++j) begin  : core_gen
-        snitch_cluster_pkg::narrow_out_req_t    axi_icache_snitch_req;
-        snitch_cluster_pkg::narrow_out_resp_t   axi_icache_snitch_resp;
-        snitch_cluster_pkg::narrow_out_req_t    [1:0]axi_data_snitch_req;
-        snitch_cluster_pkg::narrow_out_resp_t   [1:0]axi_data_snitch_resp;
-        snitch_core_axi #(
-        .AddrWidth          (AxiAddrWidth),
-        .DataWidth          (AxiDataWidth),
-        .IdWidthIn          (AxiIdWidthCore),
-        .BootAddr           (BOOT_ADDR),
-        .SnitchPMACfg       (snitch_cluster_pkg::SnitchPMACfg)    
-        ) i_snitch(
-            .clk_i                  (ce_clk),
-            .rst_ni                 (internal_ce_rstn),
-            .hart_id_i              ((j)), // id unique only in the cluster
-            .irq_i                  ('0),
-            // icache
-            .inst_out_req_o         (axi_icache_snitch_req     ),
-            .inst_out_resp_i        (axi_icache_snitch_resp    ),
-            // integer core
-            .data_core_out_req_o    (axi_data_snitch_req    [0]),
-            .data_core_out_resp_i   (axi_data_snitch_resp   [0]),
-            // fpu
-            .data_fpu_out_req_o     (axi_data_snitch_req    [1]),
-            .data_fpu_out_resp_i    (axi_data_snitch_resp   [1])
+        // hart id = core index in the cluster, no plic (no external interrupts)
+        snitch_pkg::interrupts_t core_irq;
+        assign core_irq = '{
+            debug: 1'b0,
+            meip:  1'b0,
+            mtip:  timer_irq[j],
+            msip:  ipi[j],
+            mcip:  1'b0
+        };
+        snitch_cd_wrapper #(
+            .AxiAddrWidth   ( AxiAddrWidth   ),
+            .AxiDataWidth   ( AxiDataWidth   ),
+            .AxiUserWidth   ( AxiUserWidth   ),
+            .AxiIdWidth     ( AxiIdWidthCore ),
+            .BootAddr       ( BOOT_ADDR      ),
+            .SnitchPMACfg   ( snitch_cluster_pkg::SnitchPMACfg )
+        ) i_snitch (
+            .clk_core_i     ( clk_core[i][j]     ),
+            .clk_cluster_i  ( clk_cluster[i]     ),
+            .rst_cluster_ni ( rst_cluster_n[i]   ),
+            .rst_ni         ( ce_rst_async_n     ),
+            .hart_id_i      ( j                  ),
+            .irq_i          ( core_irq           ),
+            .data_core      ( axi_snitch2mux[0 + (3*j)] ),  // integer core lsu
+            .data_fpu       ( axi_snitch2mux[1 + (3*j)] ),  // fpu lsu
+            .inst           ( axi_snitch2mux[2 + (3*j)] )   // icache
         );
-        // integer core lsu
-        `AXI_ASSIGN_FROM_REQ (axi_snitch2mux[0 + (3*j)], axi_data_snitch_req[0])
-        `AXI_ASSIGN_TO_RESP  (axi_data_snitch_resp[0], axi_snitch2mux[0 + (3*j)])
-        // fpu lsu
-        `AXI_ASSIGN_FROM_REQ (axi_snitch2mux[1 + (3*j)], axi_data_snitch_req[1])
-        `AXI_ASSIGN_TO_RESP  (axi_data_snitch_resp[1], axi_snitch2mux[1 + (3*j)])
-        // icache 
-        `AXI_ASSIGN_FROM_REQ (axi_snitch2mux[2 + (3*j)], axi_icache_snitch_req)
-        `AXI_ASSIGN_TO_RESP  (axi_icache_snitch_resp, axi_snitch2mux[2 + (3*j)])
-    end
+    end : core_gen
+
     AXI_BUS #(
         .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
         .AXI_DATA_WIDTH ( AxiDataWidth     ),
@@ -202,20 +201,15 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .AXI_DATA_WIDTH ( AxiDataWidth     ),
         .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
         .AXI_USER_WIDTH ( AxiUserWidth     )
-    ) axi_rom();
-    AXI_BUS #(
-        .AXI_ADDR_WIDTH ( AxiAddrWidth     ),
-        .AXI_DATA_WIDTH ( AxiDataWidth     ),
-        .AXI_ID_WIDTH   ( AxiIdWidthToUncore ),
-        .AXI_USER_WIDTH ( AxiUserWidth     )
-    ) axi_clint();
+    ) axi_rom(), axi_clint();
+
     axi_xbar_intf #(
         .AXI_USER_WIDTH(AxiUserWidth),
         .Cfg(xbar_cfg),
         .rule_t(rule_t)
     ) i_axi_xbar_intf (
-        .clk_i(ce_clk),
-        .rst_ni(internal_ce_rstn),
+        .clk_i(clk_cluster[i]),
+        .rst_ni(rst_cluster_n[i]),
         .test_i('0),
         .slv_ports(axi_snitch2mux),
         .mst_ports(axi_xbar2uncore),
@@ -226,15 +220,16 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
 
     // to hbm
     `AXI_ASSIGN(axi_dram[i], axi_xbar2uncore[1])
-    // to cfu
+    // to descriptor memory
     `AXI_ASSIGN(axi_desc[i], axi_xbar2uncore[2])
     // to uncore
     `AXI_ASSIGN(axi_rom, axi_xbar2uncore[0])
     `AXI_ASSIGN(axi_clint, axi_xbar2uncore[3])
-    // clint logic
+
+    // CLINT
     logic rtc;
-    always_ff @(posedge ce_clk or negedge internal_ce_rstn) begin
-        if (~internal_ce_rstn) begin
+    always_ff @(posedge clk_cluster[i] or negedge rst_cluster_n[i]) begin
+        if (~rst_cluster_n[i]) begin
             rtc <= 0;
         end else begin
             rtc <= rtc ^ 1'b1;
@@ -245,16 +240,17 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .DataWidth(AxiDataWidth),
         .IdWidthIn(AxiIdWidthToUncore),
         .UserWidth(AxiUserWidth),
-        .NR_CORES(1)
+        .NR_CORES(CORE_NUMBER)
     ) axi_clint_instance(
-        .clk_i(ce_clk),
-        .rst_ni(internal_ce_rstn),
+        .clk_i(clk_cluster[i]),
+        .rst_ni(rst_cluster_n[i]),
         .testmode_i('0),
         .clint(axi_clint),
         .rtc_i(rtc),
-        .timer_irq_o(core_irq_i[i].mtip),
-        .ipi_o(core_irq_i[i].msip)
+        .timer_irq_o(timer_irq),
+        .ipi_o(ipi)
     );
+
     // ROM
     logic                    rom_req;
     logic [AxiAddrWidth-1:0] rom_addr;
@@ -267,8 +263,8 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .USER_WIDTH ( AxiUserWidth),
         .NUM_BANKS  ( 1)
     ) i_axi_to_mem (
-        .clk_i       ( ce_clk),
-        .rst_ni      ( internal_ce_rstn),
+        .clk_i       ( clk_cluster[i]),
+        .rst_ni      ( rst_cluster_n[i]),
         .busy_o      ( ),
         .slv         ( axi_rom),
         .mem_req_o   ( rom_req),
@@ -281,55 +277,33 @@ for ( genvar i=0; i<CLUSTER_NUMBER; ++i) begin  : snitch_cluster_gen
         .mem_rvalid_i( rom_rvalid),
         .mem_rdata_i ( rom_rdata)
     );
+    // module of the -bootrom build option (bootrom.sv, gen_rom.py names the module as the file)
     bootrom i_bootrom (
-        .clk_i      ( ce_clk       ),
+        .clk_i      ( clk_cluster[i] ),
         .req_i      ( rom_req   ),
         .addr_i     ( rom_addr  ),
         .rdata_o    ( rom_rdata ),
         .rvalid_o   ( rom_rvalid)
     );
-    // tie unused signal in bram channel to 0
-    // assign axi_dram[i].b_user = '0;
-    // assign axi_dram[i].r_user = '0;
-end
-
-// -----------------
-// CLOCK AND RESET
-// -----------------
-
-// compute engine clock
-xlnx_clk_gen i_ce_clk_gen (
-    .clk_out1 ( ce_clk      ),  // Core 50 MHz
-    .reset    ( ~ref_areset_n  ),
-    .locked   ( pll_locked  ),
-    .clk_in1  ( ref_clk   )   // 250 Mhz ref clk
-);
-
-rstgen i_rstgen_main (
-      .clk_i        ( ce_clk                    ),
-      .rst_ni       ( pll_locked & (ref_areset_n)  ),
-      .test_mode_i  ( '0                          ),
-      .rst_no       ( internal_ce_rstn            ),
-      .init_no      (                             ) // keep open
-  );
+end : snitch_cluster_gen
 
 // -----------------
 // OUTPUT CDC
 // -----------------
 
-// clock domain conversion: riscv -> desc_mem, one per cluster
-for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : desc_cdc
+// clock domain conversion: cluster -> desc_mem, one per cluster
+for (genvar i = 0; i < DRAM_CH_NUMBER; i++) begin : desc_cdc
 
     axi_cdc_intf #(
-      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
-      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
-      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
-      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
+      .AXI_ID_WIDTH   (AxiIdWidthToUncore),
+      .AXI_ADDR_WIDTH (AxiAddrWidth),
+      .AXI_DATA_WIDTH (AxiDataWidth),
+      .AXI_USER_WIDTH (AxiUserWidth),
       .LOG_DEPTH(3),
       .SYNC_STAGES(2)
     ) axi_cdc_rv_desc (
-      .src_clk_i  (ce_clk),
-      .src_rst_ni (internal_ce_rstn),
+      .src_clk_i  (clk_cluster[i]),
+      .src_rst_ni (rst_cluster_n[i]),
       .src        (axi_desc[i]),
 
       .dst_clk_i  (desc_axim_clk),
@@ -341,19 +315,19 @@ for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : desc_cdc
     `AXI_ASSIGN_FROM_RESP(axi_cdc2out_desc[i], m_axim_desc_resp[i])
 end : desc_cdc
 
-// clock domain conversion: riscv -> dram, one per cluster
-for (genvar i = 0; i < dpa_pkg::DRAM_CH_NUMBER; i++) begin : dram_cdc
+// clock domain conversion: cluster -> dram, one per cluster
+for (genvar i = 0; i < DRAM_CH_NUMBER; i++) begin : dram_cdc
 
     axi_cdc_intf #(
-      .AXI_ID_WIDTH   (dpa_pkg::ce_IdWidthToUncore),
-      .AXI_ADDR_WIDTH (dpa_pkg::ce_AddrWidth),
-      .AXI_DATA_WIDTH (dpa_pkg::ce_DataWidth),
-      .AXI_USER_WIDTH (dpa_pkg::ce_UserWidth),
+      .AXI_ID_WIDTH   (AxiIdWidthToUncore),
+      .AXI_ADDR_WIDTH (AxiAddrWidth),
+      .AXI_DATA_WIDTH (AxiDataWidth),
+      .AXI_USER_WIDTH (AxiUserWidth),
       .LOG_DEPTH(3),
       .SYNC_STAGES(2)
     ) axi_cdc_rv_mem (
-      .src_clk_i  (ce_clk),
-      .src_rst_ni (internal_ce_rstn),
+      .src_clk_i  (clk_cluster[i]),
+      .src_rst_ni (rst_cluster_n[i]),
       .src        (axi_dram[i]),
 
       .dst_clk_i  (dram_axim_clk),

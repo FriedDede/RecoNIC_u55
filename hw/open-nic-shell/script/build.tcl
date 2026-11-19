@@ -71,7 +71,9 @@ set build_root [file normalize ${root_dir}/../../build]
 #   impl         Run implementation after creating design project
 #   post_impl    Perform post implementation actions
 #   user_plugin  Path to the user plugin repo
-#   bootrom      bootrom.sv for the compute engine (default: hw/reconic/compute/dpa/bootrom_u55)
+#   bootrom      bootrom.sv for the compute engine (module bootrom, built by scripts/Makefile)
+#   ce_core      compute engine cores from hw/riscv-cores: snitch (default) or mini
+#   ce_mini_rtl  riscv-mini Tile.sv generated from chisel (ce_core mini, built by scripts/Makefile)
 #   bitstream_userid       Bitstream.config userid
 #   bitstream_usr_access   Bitstream.config usr_access
 #
@@ -97,6 +99,8 @@ array set build_options {
     -post_impl   0
     -user_plugin ""
     -bootrom     ""
+    -ce_core     snitch
+    -ce_mini_rtl ""
     -bitstream_userid  "0xDEADC0DE"
     -bitstream_usr_access "0x66669999"
 }
@@ -139,6 +143,13 @@ foreach {key value} [array get design_params] {
 # Relative paths are taken from the directory build.tcl was started in
 if {![string equal $bootrom ""]} {
     set bootrom [file normalize $bootrom]
+}
+if {![string equal $ce_mini_rtl ""]} {
+    set ce_mini_rtl [file normalize $ce_mini_rtl]
+}
+if {[lsearch -exact {snitch mini} $ce_core] < 0} {
+    puts "Invalid value for -ce_core: allowed values are snitch, mini"
+    exit
 }
 
 # Sanity check

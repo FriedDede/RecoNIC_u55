@@ -17,6 +17,7 @@
 #    make build_nic OVERWRITE=1     # also regenerate all IPs from scratch
 #    make synth BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
 #                                   # use that directory's bootrom.sv
+#    make build_nic CE_CORE=mini    # riscv-mini compute engine instead of snitch
 #    make mcs                       # convert $(BUILD_DIR)/$(BOARD)/bitstream/
 #                                   # open_nic_shell.bit to .mcs (same dir)
 #    make mcs BITSTREAM=foo.bit     # convert another bitstream
@@ -39,10 +40,21 @@ MAX_PKT_LEN ?= 9600
 OVERWRITE   ?= 0
 IMPL        ?= 1
 SYNTH       ?= 1
-# Directory of the bootrom.sv compiled into the RISC-V compute engine
-BOOTROM_DIR ?= $(ROOT_DIR)/hw/reconic/compute/dpa/bootrom_u55
+# RISC-V compute engine, cores from the riscv-cores submodule:
+# snitch (compute_engine) or mini (compute_engine_mini)
+CE_CORE     ?= snitch
+RISCV_CORES := $(ROOT_DIR)/hw/riscv-cores
+CE_BUILD_DIR = $(BUILD_DIR)/$(BOARD)/compute_engine
+# Directory of the bootrom.sv (module bootrom) compiled into the compute engine.
+# Empty: built from $(RISCV_CORES)/bootrom_u55 for CE_CORE in $(CE_BUILD_DIR)
+BOOTROM_DIR ?=
+BOOTROM      = $(if $(BOOTROM_DIR),$(abspath $(BOOTROM_DIR))/bootrom.sv,$(CE_BUILD_DIR)/bootrom_$(CE_CORE)/bootrom.sv)
+# riscv-mini Tile, generated from chisel (sbt) by the riscv-cores Makefile
+CE_MINI_RTL  = $(CE_BUILD_DIR)/riscv_mini/Tile.sv
+CE_DEPS      = $(BOOTROM) $(if $(filter mini,$(CE_CORE)),$(CE_MINI_RTL))
 
 VIVADO      ?= vivado
+PYTHON      ?= python3
 
 IMPL_DIR      = $(BUILD_DIR)/$(BOARD)/open_nic_shell/open_nic_shell.runs/impl_1
 BITSTREAM_DIR = $(BUILD_DIR)/$(BOARD)/bitstream
@@ -63,11 +75,12 @@ PROGRAM_ARGS = -config_file $(LTX_FILE) -target_id $(TARGET_ID) \
 # build.tcl shows when $(BUILD_DIR)/$(BOARD) already exists
 VIVADO_ARGS = -board $(BOARD) -max_pkt_len $(MAX_PKT_LEN) -jobs $(JOBS) \
               -overwrite $(OVERWRITE) -rebuild 1 -synth $(SYNTH) -impl $(IMPL) \
-              -bootrom $(abspath $(BOOTROM_DIR))/bootrom.sv
+              -bootrom $(BOOTROM) -ce_core $(CE_CORE) \
+              $(if $(filter mini,$(CE_CORE)),-ce_mini_rtl $(CE_MINI_RTL))
 
-.PHONY: build_nic mcs program_fpga_bit program_fpga_mcs check_target_id synth project clean
+.PHONY: build_nic mcs program_fpga_bit program_fpga_mcs check_target_id synth project clean FORCE
 
-build_nic:
+build_nic: $(CE_DEPS)
 	cd $(SMARTNIC_SCRIPT_DIR); $(VIVADO) -mode batch -source build.tcl -tclargs $(VIVADO_ARGS) < /dev/null
 ifeq ($(IMPL),1)
 	mkdir -p $(BITSTREAM_DIR)
@@ -94,6 +107,22 @@ synth:
 
 project:
 	$(MAKE) build_nic SYNTH=0 IMPL=0
+
+# Default compute engine bootrom: bootrom_u55 of riscv-cores built for CE_CORE
+# (bootrom_<core>.img), converted to bootrom.sv so that the module is named bootrom.
+# FORCE: the bootrom_u55 Makefile decides what to rebuild
+$(CE_BUILD_DIR)/bootrom_%/bootrom.sv: FORCE
+	@test -f $(RISCV_CORES)/bootrom_u55/Makefile || \
+	  { echo "Error: $(RISCV_CORES) is empty, run: git submodule update --init --recursive hw/riscv-cores"; exit 1; }
+	$(MAKE) -C $(RISCV_CORES)/bootrom_u55 CORE=$* BUILD_DIR=$(@D) all
+	cp $(@D)/bootrom_$*.img $(@D)/bootrom.img
+	cd $(RISCV_CORES)/bootrom_u55 && $(PYTHON) ./gen_rom.py $(@D)/bootrom.img > /dev/null
+
+# riscv-mini Tile (riscv-cores Makefile rule $(BUILD_DIR)/<run>/riscv_mini/Tile.sv)
+$(CE_MINI_RTL):
+	@test -f $(RISCV_CORES)/hw/cores/riscv-mini/Makefile || \
+	  { echo "Error: no riscv-mini sources, run: git submodule update --init --recursive hw/riscv-cores"; exit 1; }
+	$(MAKE) -C $(RISCV_CORES) BUILD_DIR=$(BUILD_DIR)/$(BOARD) $@
 
 clean:
 	rm -rf $(BUILD_DIR)/$(BOARD)

@@ -26,7 +26,9 @@ hw/
     top/                      reconic.sv
     packet_classification/    P4 packet parser and classifier
     compute/lookside/         lookaside compute logic (HLS systolic-array MM)
-    compute/dpa/              RISC-V compute engine (Snitch cluster) and its bootrom
+    compute/dpa/              RISC-V compute engine tops (snitch, riscv-mini) and dpa_pkg
+    compute/cache_subsystem/  dram cache in front of the compute engine
+  riscv-cores/       submodule: RISC-V cores, PULP infrastructure, clock-domain wrappers, bootrom_u55
     utilities/
 sw/
   onic-driver/       kernel driver (network + device memory access)
@@ -75,9 +77,11 @@ $ make build_nic
 ```
 The Vivado project is created under `build/au55c/open_nic_shell`, and the
 bitstream and debug probes are copied to `build/au55c/bitstream/`. Add
-`OVERWRITE=1` to regenerate all IPs, or `BOOTROM_DIR=<dir>` to compile another
-`bootrom.sv` into the RISC-V compute engine (default:
-`hw/reconic/compute/dpa/bootrom_u55`).
+`OVERWRITE=1` to regenerate all IPs, `CE_CORE=mini` to use the riscv-mini compute
+engine instead of snitch, or `BOOTROM_DIR=<dir>` to compile another `bootrom.sv` into
+the RISC-V compute engine (default: `hw/riscv-cores/bootrom_u55` built for `CE_CORE`
+under `build/au55c/compute_engine`). The cores come from the `hw/riscv-cores`
+submodule: `git submodule update --init --recursive hw/riscv-cores`.
 
 * Program the FPGA
 

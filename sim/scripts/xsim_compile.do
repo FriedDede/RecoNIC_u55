@@ -57,8 +57,8 @@ xvlog $xvlog_opts -work reco -sv -L $(xil_lib ernic) -i ../build/ip/rdma_core/hd
 "../build/ip/rdma_core/sim/rdma_core.sv"
 
 xvlog $xvlog_opts -work reco \
-"../build/ip/xlnx_clk_gen/xlnx_clk_gen_clk_wiz.v" \
-"../build/ip/xlnx_clk_gen/xlnx_clk_gen.v"
+"../build/ip/xlnx_clk_gen_cluster/xlnx_clk_gen_cluster_clk_wiz.v" \
+"../build/ip/xlnx_clk_gen_cluster/xlnx_clk_gen_cluster.v"
 
 xvlog $xvlog_opts -work reco -sv \
 "../../hw/open-nic-shell/src/utility/generic_reset.sv" \
@@ -68,12 +68,19 @@ xvlog $xvlog_opts -work reco -sv \
 xvlog $xvlog_opts -d DEBUG -work reco -i ../../hw/reconic/compute/lookside/interface -f ./interface.f
 xvlog $xvlog_opts -d DEBUG -work reco -i ../../hw/reconic/compute/lookside/kernel -f ./kernel.f
 
-# Compute engine (hw/reconic/compute/dpa): same file set as the hardware build.
+# Compute engine (hw/riscv-cores + hw/reconic/compute): same file list as the hardware
+# build (hw/reconic/compute/gen_ce_filelist.py). CE_CORE (snitch or mini), DPA_BOOTROM and
+# CE_MINI_RTL come from sim/Makefile (make ce builds the bootrom and the riscv-mini Tile).
 # XSIM selects the xsim workarounds in the PULP sources
-python3 ./gen_dpa_filelist.py -tool xsim ${DPA_BOOTROM:+-bootrom $DPA_BOOTROM}
+CE_CORE=${CE_CORE:-snitch}
+DPA_BOOTROM=${DPA_BOOTROM:-../build/compute_engine/bootrom_$CE_CORE/bootrom.sv}
+python3 -I ../../hw/reconic/compute/gen_ce_filelist.py -tool xsim -core $CE_CORE -bootrom $DPA_BOOTROM \
+  ${CE_MINI_RTL:+-mini-rtl $CE_MINI_RTL}
+CE_DEFINE=""
+[ "$CE_CORE" = mini ] && CE_DEFINE="-d CE_MINI"
 xvlog $xvlog_opts -sv -d XSIM -L xpm -work reco -f ./dpa_inc.f -f ./dpa.f
 
-xvlog $xvlog_opts -sv -L xpm -L $(xil_lib ernic) -L $(xil_lib axi_bram_ctrl) -d DEBUG -work reco -f ./dpa_inc.f \
+xvlog $xvlog_opts -sv -L xpm -L $(xil_lib ernic) -L $(xil_lib axi_bram_ctrl) -d DEBUG $CE_DEFINE -work reco -f ./dpa_inc.f \
 "../../hw/reconic/utilities/rn_reg_control.sv" \
 "../../hw/reconic/packet_classification/packet_classification.sv" \
 "../../hw/reconic/packet_classification/packet_filter.sv" \

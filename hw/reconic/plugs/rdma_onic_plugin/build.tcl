@@ -15,65 +15,44 @@ add_files -norecurse [glob ${shell_dir}/compute/lookside/kernel/*.v]
 
 
 # ------------------------------------------------------------------
-# Compute engine (compute/dpa): all RTL except testbenches, simulation
-# models, duplicates and unused files that include missing headers
+# Compute engine: RTL from the riscv-cores submodule (hw/riscv-cores) and
+# compute/{dpa,cache_subsystem}, listed in dependency order by
+# compute/gen_ce_filelist.py (also used by the simulation)
+#   -ce_core      snitch (compute_engine) or mini (compute_engine_mini)
+#   -bootrom      bootrom.sv of the compute engine (module bootrom)
+#   -ce_mini_rtl  riscv-mini Tile.sv, generated from chisel (-ce_core mini)
+# scripts/Makefile builds the bootrom and the riscv-mini Tile.
 # ------------------------------------------------------------------
-set dpa_dir ${shell_dir}/compute/dpa
-set dpa_skip_dirs {
-    fpu_div_sqrt
-    common_cells/src/deprecated
+if {![info exists ce_core] || [string equal $ce_core ""]} {
+    set ce_core snitch
 }
-set dpa_skip_files {
-    bootrom_u55/bootrom.sv
-    dpa.sv
-    dpa_tb.sv
-    axi_pulp/axi_test.sv
-    axi_pulp/axi_sim_mem.sv
-    cache_subsystem/cache_sim.sv
-    cache_subsystem/tb_cache_filter.sv
-    cache_subsystem/tb_page_mover.sv
-    common_cells/instr_tracer.sv
-    scm/register_file_2r_1w_asymm_test_wrap.sv
-    snitch/snitch_l0_tlb_tb.sv
-    snitch_cluster/snitch_cluster.sv
-    xdma_boot/tb_axi_boot_check.sv
+if {![info exists bootrom] || [string equal $bootrom ""]} {
+    error "ERROR: \[ce\] no bootrom: pass -bootrom <bootrom.sv> (scripts/Makefile builds one)"
 }
-
-proc dpa_collect {dir rel skip_dirs skip_files hdl_var inc_var} {
-    upvar $hdl_var hdl
-    upvar $inc_var inc
-    if {[llength [glob -nocomplain -directory $dir -types f *.svh *.vh]]} {
-        lappend inc $dir
+set ce_gen_args [list -tool vivado -core $ce_core -bootrom $bootrom -o ${top_build_dir}/ce_filelist]
+if {[string equal $ce_core mini]} {
+    if {![info exists ce_mini_rtl] || [string equal $ce_mini_rtl ""]} {
+        error "ERROR: \[ce\] -ce_core mini needs -ce_mini_rtl <Tile.sv> (scripts/Makefile builds it)"
     }
-    foreach f [glob -nocomplain -directory $dir -types f *.sv *.v] {
-        set r [string trimleft "$rel/[file tail $f]" /]
-        if {[lsearch -exact $skip_files $r] < 0} {
-            lappend hdl $f
-        }
-    }
-    foreach d [glob -nocomplain -directory $dir -types d *] {
-        set r [string trimleft "$rel/[file tail $d]" /]
-        if {[lsearch -exact $skip_dirs $r] < 0} {
-            dpa_collect $d $r $skip_dirs $skip_files hdl inc
-        }
-    }
+    lappend ce_gen_args -mini-rtl [file normalize $ce_mini_rtl]
 }
+if {[catch {exec python3 -I ${shell_dir}/compute/gen_ce_filelist.py {*}$ce_gen_args 2>@1} ce_gen_log]} {
+    error "ERROR: \[ce\] gen_ce_filelist.py failed:\n$ce_gen_log"
+}
+puts $ce_gen_log
 
-set dpa_hdl {}
-set dpa_inc {}
-dpa_collect $dpa_dir "" $dpa_skip_dirs $dpa_skip_files dpa_hdl dpa_inc
-add_files -norecurse $dpa_hdl
-
-# Compute engine bootrom: -bootrom build option, or the one shipped with dpa
-if {[info exists bootrom] && ![string equal $bootrom ""]} {
-    set dpa_bootrom $bootrom
-} else {
-    set dpa_bootrom ${dpa_dir}/bootrom_u55/bootrom.sv
+proc ce_read_list {f} {
+    set fp [open $f r]
+    set l [split [string trim [read $fp]] "\n"]
+    close $fp
+    return $l
 }
-if {![file exists $dpa_bootrom]} {
-    error "ERROR: \[dpa\] bootrom not found: $dpa_bootrom"
+set ce_hdl [ce_read_list ${top_build_dir}/ce_filelist/dpa.f]
+set ce_inc [ce_read_list ${top_build_dir}/ce_filelist/dpa_inc.f]
+add_files -norecurse $ce_hdl
+set_property include_dirs [concat [get_property include_dirs [current_fileset]] $ce_inc] [current_fileset]
+# compute_logic_wrapper.sv instantiates compute_engine_mini under CE_MINI
+if {[string equal $ce_core mini]} {
+    set_property verilog_define [concat [get_property verilog_define [current_fileset]] CE_MINI] [current_fileset]
 }
-add_files -norecurse $dpa_bootrom
-puts "INFO: \[dpa\] bootrom: $dpa_bootrom"
-set_property include_dirs [concat [get_property include_dirs [current_fileset]] $dpa_inc] [current_fileset]
-puts "INFO: \[dpa\] added [llength $dpa_hdl] RTL files, [llength $dpa_inc] include dirs"
+puts "INFO: \[ce\] $ce_core compute engine: [llength $ce_hdl] RTL files, [llength $ce_inc] include dirs, bootrom: $bootrom"

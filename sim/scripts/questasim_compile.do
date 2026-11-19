@@ -57,8 +57,8 @@ vlog -64 -work reco -sv -L $(xil_lib ernic) "+incdir+../build/ip/rdma_core/hdl/c
 "../build/ip/rdma_core/sim/rdma_core.sv"
 
 vlog -64 -work reco \
-"../build/ip/xlnx_clk_gen/xlnx_clk_gen_clk_wiz.v" \
-"../build/ip/xlnx_clk_gen/xlnx_clk_gen.v"
+"../build/ip/xlnx_clk_gen_cluster/xlnx_clk_gen_cluster_clk_wiz.v" \
+"../build/ip/xlnx_clk_gen_cluster/xlnx_clk_gen_cluster.v"
 
 vlog -64 -work reco -sv \
 "../../hw/open-nic-shell/src/utility/generic_reset.sv" \
@@ -68,12 +68,19 @@ vlog -64 -work reco -sv \
 vlog -64 +define+DEBUG -work reco +incdir+../../hw/reconic/compute/lookside/interface -f ./interface.f
 vlog -64 +define+DEBUG -work reco +incdir+../../hw/reconic/compute/lookside/kernel -f ./kernel.f
 
-# Compute engine (hw/reconic/compute/dpa): same file set as the hardware build.
+# Compute engine (hw/riscv-cores + hw/reconic/compute): same file list as the hardware
+# build (hw/reconic/compute/gen_ce_filelist.py). CE_CORE (snitch or mini), DPA_BOOTROM and
+# CE_MINI_RTL come from sim/Makefile (make ce builds the bootrom and the riscv-mini Tile).
 # QUESTA selects the Questa workarounds in the PULP sources
-python3 ./gen_dpa_filelist.py -tool questasim ${DPA_BOOTROM:+-bootrom $DPA_BOOTROM}
+CE_CORE=${CE_CORE:-snitch}
+DPA_BOOTROM=${DPA_BOOTROM:-../build/compute_engine/bootrom_$CE_CORE/bootrom.sv}
+python3 -I ../../hw/reconic/compute/gen_ce_filelist.py -tool questasim -core $CE_CORE -bootrom $DPA_BOOTROM \
+  ${CE_MINI_RTL:+-mini-rtl $CE_MINI_RTL}
+CE_DEFINE=""
+[ "$CE_CORE" = mini ] && CE_DEFINE="+define+CE_MINI"
 vlog -64 -sv +define+QUESTA -L xpm -work reco -f ./dpa_inc.f -f ./dpa.f
 
-vlog -64 -sv -L xpm -L $(xil_lib ernic) +define+DEBUG -work reco -f ./dpa_inc.f \
+vlog -64 -sv -L xpm -L $(xil_lib ernic) +define+DEBUG $CE_DEFINE -work reco -f ./dpa_inc.f \
 "../../hw/reconic/utilities/rn_reg_control.sv" \
 "../../hw/reconic/packet_classification/packet_classification.sv" \
 "../../hw/reconic/packet_classification/packet_filter.sv" \

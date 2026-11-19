@@ -1,5 +1,5 @@
 # Vivado translation of the cdc_fifo_gray constraints documented in
-# hw/reconic/compute/dpa/common_cells/cdc_fifo_gray.sv:
+# hw/riscv-cores/hw/infra/common_cells/src/cdc_fifo_gray.sv:
 #   max delay = min(T_src, T_dst) through the async_* ports,
 #   no hold check (-datapath_only).
 # cdc_fifo_gray_src/_dst are also instantiated directly (e.g. axi_cdc splits
