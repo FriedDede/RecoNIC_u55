@@ -36,7 +36,7 @@ int main(void)
 {
     while (1) {
         // wait for the host to issue a command
-        while (CTL_CMD_LO(DESC_REG(CTL_CMD_W_STATUS)) == 0)
+        while (CTL_CMD_LO(DESC_REG(CTL_CMD_W_STATUS)) != CTL_CMD_START)
             ;
 
         uint32_t a_base = DESC_REG(CTL_CMD_W_A_BASE);

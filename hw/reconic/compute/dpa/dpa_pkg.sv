@@ -1,6 +1,6 @@
 `include "axi_typedef.svh"
 
-package dpa_pkg; import axi_pkg::*; import snitch_cluster_pkg::*;
+package dpa_pkg; import axi_pkg::*;
 
 // COMPUTE ENGINE PARAMETERS
 
@@ -10,13 +10,13 @@ localparam CLUSTER_NUMBER       = 1;
 localparam TOTAL_CORE_NUMBER    = CORE_NUMBER * CLUSTER_NUMBER;
 localparam PERIF_NUMBER         = 0; // uart, timer, plic
 localparam DRAM_CH_NUMBER       = CLUSTER_NUMBER; // snitch clusters
-localparam ce_AddrWidth         = snitch_cluster_pkg::AddrWidth;            // 32
-localparam ce_DataWidth         = snitch_cluster_pkg::NarrowDataWidth;      // 64
-localparam ce_IdWidthCore       = snitch_cluster_pkg::NarrowIdWidthIn;      // 1
+localparam ce_AddrWidth         = 32;
+localparam ce_DataWidth         = 64;
+localparam ce_IdWidthCore       = 1;
 localparam ce_IdWidthToUncore   = ce_IdWidthCore + $clog2(3 * CORE_NUMBER);  // 1 + clog2(3*CORE_NUMBER) = 3 (each core exposes 3 channels)
 localparam ce_IdWidthToPerifs   = ce_IdWidthToUncore + $clog2(CLUSTER_NUMBER); 
-localparam ce_IdWidth_unif_dram   = ce_IdWidthToUncore + $clog2(CLUSTER_NUMBER); 
-localparam ce_UserWidth         = snitch_cluster_pkg::NarrowUserWidth;
+localparam ce_IdWidth_unif_dram = ce_IdWidthToUncore + $clog2(CLUSTER_NUMBER); 
+localparam ce_UserWidth         = 1;
 
 // Descriptor BRAM AXI ID width: the host + CEs mux in front of it
 // (compute_logic_wrapper.sv desc_mux, DRAM_CH_NUMBER + 1 slave ports) prepends
@@ -32,7 +32,6 @@ typedef logic [ce_IdWidthToUncore-1:0]    ce2mem_narrow_id_t;
 typedef logic [ce_UserWidth-1:0]          ce2mem_user_t;
 
 `AXI_TYPEDEF_ALL(axim64_core2mem, ce2mem_addr_t,  ce2mem_narrow_id_t,  ce2mem_data_t,  ce2mem_strb_t,  ce2mem_user_t)
-
 
 // AXI STREAMING TO AXI MM 512 bit INTERFACE PARAMETERS
 
