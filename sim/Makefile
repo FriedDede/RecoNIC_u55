@@ -43,6 +43,11 @@ ROCE       ?= 1
 OVERWRITE  ?= 0
 # RISC-V compute engine, cores from the riscv-cores submodule: mini or snitch
 CE_CORE     ?= mini
+# compute engine clocks in MHz (cores, cluster crossbar), generated from the 250 MHz axis_aclk
+CE_FREQ_CORE    ?= 250
+CE_FREQ_CLUSTER ?= 250
+# the IPs are regenerated when the frequencies change
+CE_CLK_CFG   = $(BUILD_DIR)/ce_clk.cfg
 RISCV_CORES := $(ROOT_DIR)/hw/riscv-cores
 CE_BUILD_DIR = $(BUILD_DIR)/compute_engine
 # Optional bootrom.sv (module bootrom) for the compute engine.
@@ -76,10 +81,16 @@ ifeq ($(OVERWRITE),1)
 .PHONY: $(IP_STAMP)
 endif
 
-$(IP_STAMP): $(IP_SRCS)
+$(CE_CLK_CFG): FORCE
+	@mkdir -p $(@D)
+	@echo "core $(CE_FREQ_CORE) cluster $(CE_FREQ_CLUSTER)" > $@.new
+	@if cmp -s $@.new $@; then rm $@.new; else mv $@.new $@; fi
+
+$(IP_STAMP): $(IP_SRCS) $(CE_CLK_CFG)
 	rm -rf $(IP_DIR) $(BUILD_DIR)/managed_ip
 	cd $(SCRIPT_DIR); $(VIVADO) -mode batch -nojournal -log $(BUILD_DIR)/gen_vivado_ip.log \
-	  -source gen_vivado_ip.tcl < /dev/null
+	  -source gen_vivado_ip.tcl -tclargs -ce_core_freq_mhz $(CE_FREQ_CORE) \
+	  -ce_cluster_freq_mhz $(CE_FREQ_CLUSTER) < /dev/null
 	touch $@
 
 # compute engine sources generated from the riscv-cores submodule

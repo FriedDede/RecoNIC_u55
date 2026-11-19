@@ -11,10 +11,13 @@
 # Same ports as xlnx_clk_gen_cluster in hw/riscv-cores/tcl_scripts/gen_clock.tcl, but
 # driven by the 250 MHz axis_aclk of the box_250mhz (already on a global clock buffer).
 #
-# Frequencies in MHz (default 250 / 250): set ce_core_freq_mhz / ce_cluster_freq_mhz before
-# sourcing to change them.
+# Frequencies in MHz, ce_core_freq_mhz / ce_cluster_freq_mhz: set by the caller, from
+# scripts/Makefile (hw/open-nic-shell/script/build.tcl options) or sim/Makefile
+# (sim/scripts/gen_vivado_ip.tcl options), CE_FREQ_CORE / CE_FREQ_CLUSTER (default 250 / 250).
 foreach f {ce_core_freq_mhz ce_cluster_freq_mhz} {
-    if {![info exists $f]} { set $f 250 }
+    if {![info exists $f] || [string equal [set $f] ""]} {
+        error "ERROR: \[xlnx_clk_gen_cluster\] $f is not set"
+    }
 }
 
 set ipName xlnx_clk_gen_cluster

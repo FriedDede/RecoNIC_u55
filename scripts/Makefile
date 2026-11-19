@@ -18,6 +18,8 @@
 #    make synth BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
 #                                   # use that directory's bootrom.sv
 #    make build_nic CE_CORE=snitch  # snitch compute engine instead of riscv-mini
+#    make build_nic CE_FREQ_CORE=200 CE_FREQ_CLUSTER=100
+#                                   # compute engine clocks in MHz (default 250 / 250)
 #    make mcs                       # convert $(BUILD_DIR)/$(BOARD)/bitstream/
 #                                   # open_nic_shell.bit to .mcs (same dir)
 #    make mcs BITSTREAM=foo.bit     # convert another bitstream
@@ -43,6 +45,9 @@ SYNTH       ?= 1
 # RISC-V compute engine, cores from the riscv-cores submodule:
 # mini (compute_engine_mini) or snitch (compute_engine)
 CE_CORE     ?= mini
+# compute engine clocks in MHz (cores, cluster crossbar), generated from the 250 MHz axis_aclk
+CE_FREQ_CORE    ?= 250
+CE_FREQ_CLUSTER ?= 250
 RISCV_CORES := $(ROOT_DIR)/hw/riscv-cores
 CE_BUILD_DIR = $(BUILD_DIR)/$(BOARD)/compute_engine
 # Directory of the bootrom.sv (module bootrom) compiled into the compute engine.
@@ -76,6 +81,7 @@ PROGRAM_ARGS = -config_file $(LTX_FILE) -target_id $(TARGET_ID) \
 VIVADO_ARGS = -board $(BOARD) -max_pkt_len $(MAX_PKT_LEN) -jobs $(JOBS) \
               -overwrite $(OVERWRITE) -rebuild 1 -synth $(SYNTH) -impl $(IMPL) \
               -bootrom $(BOOTROM) -ce_core $(CE_CORE) \
+              -ce_core_freq_mhz $(CE_FREQ_CORE) -ce_cluster_freq_mhz $(CE_FREQ_CLUSTER) \
               $(if $(filter mini,$(CE_CORE)),-ce_mini_rtl $(CE_MINI_RTL))
 
 .PHONY: build_nic mcs program_fpga_bit program_fpga_mcs check_target_id synth project clean FORCE

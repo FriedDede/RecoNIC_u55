@@ -5,6 +5,8 @@
 #==============================================================================
 array set build_options {
   -board_repo ""
+  -ce_core_freq_mhz    250
+  -ce_cluster_freq_mhz 250
 }
 
 # Expect arguments in the form of `-argument value`
