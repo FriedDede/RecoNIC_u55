@@ -18,13 +18,13 @@ add_files -norecurse [glob ${shell_dir}/compute/lookside/kernel/*.v]
 # Compute engine: RTL from the riscv-cores submodule (hw/riscv-cores) and
 # compute/{dpa,cache_subsystem}, listed in dependency order by
 # compute/gen_ce_filelist.py (also used by the simulation)
-#   -ce_core      snitch (compute_engine) or mini (compute_engine_mini)
+#   -ce_core      mini (compute_engine_mini, default) or snitch (compute_engine)
 #   -bootrom      bootrom.sv of the compute engine (module bootrom)
 #   -ce_mini_rtl  riscv-mini Tile.sv, generated from chisel (-ce_core mini)
 # scripts/Makefile builds the bootrom and the riscv-mini Tile.
 # ------------------------------------------------------------------
 if {![info exists ce_core] || [string equal $ce_core ""]} {
-    set ce_core snitch
+    set ce_core mini
 }
 if {![info exists bootrom] || [string equal $bootrom ""]} {
     error "ERROR: \[ce\] no bootrom: pass -bootrom <bootrom.sv> (scripts/Makefile builds one)"

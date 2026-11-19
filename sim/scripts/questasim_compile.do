@@ -69,13 +69,14 @@ vlog -64 +define+DEBUG -work reco +incdir+../../hw/reconic/compute/lookside/inte
 vlog -64 +define+DEBUG -work reco +incdir+../../hw/reconic/compute/lookside/kernel -f ./kernel.f
 
 # Compute engine (hw/riscv-cores + hw/reconic/compute): same file list as the hardware
-# build (hw/reconic/compute/gen_ce_filelist.py). CE_CORE (snitch or mini), DPA_BOOTROM and
+# build (hw/reconic/compute/gen_ce_filelist.py). CE_CORE (mini or snitch), DPA_BOOTROM and
 # CE_MINI_RTL come from sim/Makefile (make ce builds the bootrom and the riscv-mini Tile).
 # QUESTA selects the Questa workarounds in the PULP sources
-CE_CORE=${CE_CORE:-snitch}
+CE_CORE=${CE_CORE:-mini}
+CE_MINI_RTL=${CE_MINI_RTL:-../build/compute_engine/riscv_mini/Tile.sv}
 DPA_BOOTROM=${DPA_BOOTROM:-../build/compute_engine/bootrom_$CE_CORE/bootrom.sv}
 python3 -I ../../hw/reconic/compute/gen_ce_filelist.py -tool questasim -core $CE_CORE -bootrom $DPA_BOOTROM \
-  ${CE_MINI_RTL:+-mini-rtl $CE_MINI_RTL}
+  -mini-rtl $CE_MINI_RTL
 CE_DEFINE=""
 [ "$CE_CORE" = mini ] && CE_DEFINE="+define+CE_MINI"
 vlog -64 -sv +define+QUESTA -L xpm -work reco -f ./dpa_inc.f -f ./dpa.f

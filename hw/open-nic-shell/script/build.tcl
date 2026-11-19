@@ -72,7 +72,7 @@ set build_root [file normalize ${root_dir}/../../build]
 #   post_impl    Perform post implementation actions
 #   user_plugin  Path to the user plugin repo
 #   bootrom      bootrom.sv for the compute engine (module bootrom, built by scripts/Makefile)
-#   ce_core      compute engine cores from hw/riscv-cores: snitch (default) or mini
+#   ce_core      compute engine cores from hw/riscv-cores: mini (default) or snitch
 #   ce_mini_rtl  riscv-mini Tile.sv generated from chisel (ce_core mini, built by scripts/Makefile)
 #   bitstream_userid       Bitstream.config userid
 #   bitstream_usr_access   Bitstream.config usr_access
@@ -99,7 +99,7 @@ array set build_options {
     -post_impl   0
     -user_plugin ""
     -bootrom     ""
-    -ce_core     snitch
+    -ce_core     mini
     -ce_mini_rtl ""
     -bitstream_userid  "0xDEADC0DE"
     -bitstream_usr_access "0x66669999"

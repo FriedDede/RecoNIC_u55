@@ -10,7 +10,7 @@
 #    make prepare_sim               # build everything the simulation needs:
 #                                   # Vivado IPs (build/ip), compute engine
 #                                   # bootrom and file lists, Python packages check
-#    make sim TC=write CE_CORE=mini # riscv-mini compute engine instead of snitch
+#    make sim TC=write CE_CORE=snitch # snitch compute engine instead of riscv-mini
 #    make prepare_sim OVERWRITE=1   # regenerate all IPs from scratch
 #    make sim TC=write              # run a testcase (xsim, RDMA configuration)
 #    make sim TC=read_2rdma SIM=questasim GUI=1
@@ -41,8 +41,8 @@ GUI        ?= 0
 ROCE       ?= 1
 # 1: regenerate every IP even if its scripts did not change
 OVERWRITE  ?= 0
-# RISC-V compute engine, cores from the riscv-cores submodule: snitch or mini
-CE_CORE     ?= snitch
+# RISC-V compute engine, cores from the riscv-cores submodule: mini or snitch
+CE_CORE     ?= mini
 RISCV_CORES := $(ROOT_DIR)/hw/riscv-cores
 CE_BUILD_DIR = $(BUILD_DIR)/compute_engine
 # Optional bootrom.sv (module bootrom) for the compute engine.

@@ -26,7 +26,7 @@
 #      dpa.f      RTL files in compile order
 #
 #    gen_ce_filelist.py -tool vivado|xsim|questasim -bootrom <bootrom.sv>
-#                       [-core snitch|mini] [-mini-rtl <Tile.sv>] [-o <dir>]
+#                       [-core mini|snitch] [-mini-rtl <Tile.sv>] [-o <dir>]
 #                       [-root <file> ...]
 #
 #    vivado: absolute paths, one per line. xsim/questasim: xvlog/vlog options,
@@ -125,7 +125,7 @@ def collect(core, bootrom, mini_rtl, roots):
 def main():
   ap = argparse.ArgumentParser(description='RISC-V compute engine file lists')
   ap.add_argument('-tool', required=True, choices=['vivado', 'xsim', 'questasim'])
-  ap.add_argument('-core', default='snitch', choices=list(CE_TOP))
+  ap.add_argument('-core', default='mini', choices=list(CE_TOP))
   ap.add_argument('-bootrom', required=True,
                   help='bootrom.sv compiled into the compute engine (module bootrom)')
   ap.add_argument('-mini-rtl', default='',

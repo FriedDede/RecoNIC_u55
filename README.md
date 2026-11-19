@@ -77,8 +77,8 @@ $ make build_nic
 ```
 The Vivado project is created under `build/au55c/open_nic_shell`, and the
 bitstream and debug probes are copied to `build/au55c/bitstream/`. Add
-`OVERWRITE=1` to regenerate all IPs, `CE_CORE=mini` to use the riscv-mini compute
-engine instead of snitch, or `BOOTROM_DIR=<dir>` to compile another `bootrom.sv` into
+`OVERWRITE=1` to regenerate all IPs, `CE_CORE=snitch` to use the snitch compute
+engine instead of riscv-mini (default, cores and cluster at 250 MHz), or `BOOTROM_DIR=<dir>` to compile another `bootrom.sv` into
 the RISC-V compute engine (default: `hw/riscv-cores/bootrom_u55` built for `CE_CORE`
 under `build/au55c/compute_engine`). The cores come from the `hw/riscv-cores`
 submodule: `git submodule update --init --recursive hw/riscv-cores`.

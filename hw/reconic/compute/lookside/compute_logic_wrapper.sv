@@ -236,7 +236,7 @@ axi_modify_address_intf #(
   dpa_pkg::axim64_core2mem_resp_t [dpa_pkg::DRAM_CH_NUMBER-1 : 0] m_axim_ce2cache_resp;
 
 // Compute engine parameters are in dpa_pkg.sv. The cores come from hw/riscv-cores:
-// snitch (compute_engine, default) or riscv-mini (compute_engine_mini, CE_CORE=mini -> CE_MINI)
+// riscv-mini (compute_engine_mini, CE_CORE=mini -> CE_MINI, default) or snitch (compute_engine, CE_CORE=snitch)
 `ifdef CE_MINI
 compute_engine_mini compute_engine_instance (
 `else

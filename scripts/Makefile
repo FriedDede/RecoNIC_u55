@@ -17,7 +17,7 @@
 #    make build_nic OVERWRITE=1     # also regenerate all IPs from scratch
 #    make synth BOOTROM_DIR=../examples/systolic_mm/bootrom_u55
 #                                   # use that directory's bootrom.sv
-#    make build_nic CE_CORE=mini    # riscv-mini compute engine instead of snitch
+#    make build_nic CE_CORE=snitch  # snitch compute engine instead of riscv-mini
 #    make mcs                       # convert $(BUILD_DIR)/$(BOARD)/bitstream/
 #                                   # open_nic_shell.bit to .mcs (same dir)
 #    make mcs BITSTREAM=foo.bit     # convert another bitstream
@@ -41,8 +41,8 @@ OVERWRITE   ?= 0
 IMPL        ?= 1
 SYNTH       ?= 1
 # RISC-V compute engine, cores from the riscv-cores submodule:
-# snitch (compute_engine) or mini (compute_engine_mini)
-CE_CORE     ?= snitch
+# mini (compute_engine_mini) or snitch (compute_engine)
+CE_CORE     ?= mini
 RISCV_CORES := $(ROOT_DIR)/hw/riscv-cores
 CE_BUILD_DIR = $(BUILD_DIR)/$(BOARD)/compute_engine
 # Directory of the bootrom.sv (module bootrom) compiled into the compute engine.
